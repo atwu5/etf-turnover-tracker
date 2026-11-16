@@ -5,9 +5,10 @@
 ## 技术栈
 
 - React 18 + TypeScript + Vite
-- Tailwind CSS（主色 #1B88EE）
+- Tailwind CSS（白金高奢风：象牙白 × 香槟金 #b08d57，衬线标题 + 金色渐变大数字）
 - ECharts（份额变化柱状图 / 加仓指数折线图，悬停查看数值）
-- 纯前端实现，无需后端（行情通过 JSONP / CORS 直连公开接口，与参考站机制一致）
+- 纯前端实现，无需后端（行情通过 JSONP / CORS 直连公开接口）
+- 行情双源容灾：腾讯 qt.gtimg.cn 主源 → 东方财富 push2 备源自动切换
 - localStorage 本地缓存（每交易日增量更新）+ 逐日份额历史积累
 - Vitest 单元测试（核心计算公式）
 
@@ -37,6 +38,7 @@ npx serve dist     # 本地静态预览
 | 数据 | 来源 | 说明 |
 |---|---|---|
 | 成交额 / 涨跌 / 规模 / 份额 / 外盘内盘 | `qt.gtimg.cn`（腾讯行情） | GBK 文本 `<script>` 直连，每 20 秒 |
+| 成交额 / 涨跌 / 规模 / 份额（备用） | `push2.eastmoney.com`（东方财富） | CORS fetch 直连，腾讯失败时自动切换；无外盘/内盘 |
 | 5 分钟 K 线（日内分布、20 日均额、近 30 日成交额） | `quotes.sina.cn`（新浪，JSONP） | 自带精确成交额 amount |
 | 日 K（降级备用） | 新浪 / `web.ifzq.gtimg.cn`（腾讯，CORS） | 成交额=量×价估算 |
 
@@ -48,6 +50,7 @@ src/
   data/                 数据获取层
     jsonp.ts              script 注入 / JSONP / 并发池
     tencent.ts            腾讯实时快照解析（字段映射见 docs/SPEC.md）
+    eastmoney.ts          东方财富备用行情（push2，CORS）
     sina.ts               新浪 5 分钟 K / 日 K
     store.ts              localStorage 缓存与份额历史积累
   domain/               指标计算层（纯函数，零 DOM，全部可测试）

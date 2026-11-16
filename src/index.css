@@ -11,12 +11,43 @@ html {
 }
 
 body {
-  @apply bg-[#f3f6fb] text-slate-800 antialiased;
+  background-color: #f7f3ec;
+  background-image:
+    radial-gradient(1200px 500px at 85% -8%, rgba(214, 189, 142, 0.14), transparent 60%) !important;
+  background-image:
+    radial-gradient(1200px 500px at 85% -8%, rgba(214, 189, 142, 0.14), transparent 60%),
+    radial-gradient(900px 420px at -10% 105%, rgba(214, 189, 142, 0.10), transparent 55%) !important;
+  color: #221e17;
   font-feature-settings: 'tnum';
+  -webkit-font-smoothing: antialiased;
 }
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+/* 金色渐变文字（大数字 / 标题点缀） */
+.text-gold-grad {
+  background: linear-gradient(135deg, #d9c08c 0%, #b08d57 45%, #8a6d3b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* 金色渐变底（按钮 / 进度条） */
+.bg-gold-grad {
+  background: linear-gradient(135deg, #c7a76c 0%, #b08d57 55%, #96773f 100%);
+}
+
+/* 金色发丝分隔线 */
+.hairline-gold {
+  background: linear-gradient(90deg, transparent, #d6bd8e 18%, #b08d57 50%, #d6bd8e 82%, transparent);
+  height: 1px;
+}
+
+::selection {
+  background: rgba(176, 141, 87, 0.25);
 }
 
 ::-webkit-scrollbar {
@@ -24,7 +55,8 @@ body {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  @apply rounded bg-slate-300;
+  border-radius: 8px;
+  background: #d8c9a6;
 }
 ::-webkit-scrollbar-track {
   background: transparent;

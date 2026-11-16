@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CORE_POOL, POOL, type EtfDef } from '../config/pool';
 import { fetchQuotes, fetchTencentDaily, quoteDateOf, type Quote } from '../data/tencent';
+import { fetchQuotesEM } from '../data/eastmoney';
 import { fetchSinaDaily, fetchSinaKline, type Bar } from '../data/sina';
 import { poolAll } from '../data/jsonp';
 import {
@@ -37,6 +38,45 @@ const K_DALEN_DAILY = 60;
 const POLL_MS = 20_000;
 const MARKET_OF = (code: string): 'sh' | 'sz' => (POOL.find((x) => x.code === code)?.tcode.startsWith('sh') ? 'sh' : 'sz');
 
+/**
+ * 行情快照：腾讯为主源，失败时自动切换东方财富备用源。
+ * 东方财富无外盘/内盘 → 降级模式下主动净买入不展示（其余指标齐全）。
+ */
+async function fetchQuotesWithFallback(): Promise<{ quotes: Record<string, Quote>; source: 'tencent' | 'eastmoney' }> {
+  try {
+    return { quotes: await fetchQuotes(POOL.map((x) => x.tcode)), source: 'tencent' };
+  } catch (tencentErr) {
+    const em = await fetchQuotesEM(POOL.map((x) => x.tcode));
+    const quotes: Record<string, Quote> = {};
+    for (const def of POOL) {
+      const d = em[def.code];
+      if (!d || !(d.price > 0)) continue;
+      quotes[def.tcode] = {
+        tcode: def.tcode,
+        name: d.name || def.name,
+        price: d.price,
+        prevClose: d.prevClose,
+        pct: d.pct,
+        amountWan: d.amountYuan / 1e4,
+        outerLots: 0,
+        innerLots: 0,
+        volumeLots: d.volumeLots,
+        mktcapYi: d.mktcapYuan / 1e8,
+        sharesFen: d.price > 0 ? d.mktcapYuan / d.price : 0,
+        timeStr: d.tsSec > 0 ? formatTs(d.tsSec) : '',
+      };
+    }
+    if (Object.keys(quotes).length === 0) throw tencentErr instanceof Error ? tencentErr : new Error(String(tencentErr));
+    return { quotes, source: 'eastmoney' };
+  }
+}
+
+function formatTs(tsSec: number): string {
+  const d = new Date(tsSec * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
 export function useTracker() {
   const [booting, setBooting] = useState(true);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
@@ -51,6 +91,7 @@ export function useTracker() {
   const [sharesStore, setSharesStore] = useState<SharesStore>(() => loadShares());
   const [prevShareDateLabel, setPrevShareDateLabel] = useState<string | null>(null);
   const quoteErrRef = useRef(0);
+  const quoteSrcRef = useRef<'tencent' | 'eastmoney'>('tencent');
 
   const phase: SessionPhase = useMemo(() => {
     const firstQuote = Object.values(quotes)[0];
@@ -133,12 +174,16 @@ export function useTracker() {
       const store = loadShares();
       setSharesStore(store);
       try {
-        const q = await fetchQuotes(POOL.map((x) => x.tcode));
+        const { quotes: q, source } = await fetchQuotesWithFallback();
         if (!alive) return;
         setQuotes(q);
         setDataMode('live');
         setLastUpdate(new Date());
         quoteErrRef.current = 0;
+        if (source !== quoteSrcRef.current) {
+          quoteSrcRef.current = source;
+          if (source === 'eastmoney') setWarnings((w) => [...w, '腾讯行情不可用，已自动切换东方财富备用行情（该源无外盘/内盘，主动净买入暂缺）']);
+        }
         const td = quoteDateOf(Object.values(q)[0]);
         // 缓存失效判定：交易日变化，或缓存中多数基线缺日内分布（上次全量降级）→ 重算
         const shapeless = cache ? Object.values(cache.baselines).filter((b) => !b.shape || b.shape.length === 0).length : POOL.length;
@@ -165,11 +210,16 @@ export function useTracker() {
       const ph = phaseOf(new Date(), tradeDate);
       if (auto && isLivePhase(ph)) {
         try {
-          const q = await fetchQuotes(POOL.map((x) => x.tcode));
+          const { quotes: q, source } = await fetchQuotesWithFallback();
           setQuotes(q);
           setDataMode('live');
           setLastUpdate(new Date());
           quoteErrRef.current = 0;
+          if (source !== quoteSrcRef.current) {
+            quoteSrcRef.current = source;
+            if (source === 'eastmoney') setWarnings((w) => [...w, '腾讯行情不可用，已自动切换东方财富备用行情（该源无外盘/内盘，主动净买入暂缺）']);
+            else setWarnings((w) => w.filter((x) => !x.includes('东方财富备用行情')));
+          }
         } catch {
           quoteErrRef.current++;
           if (quoteErrRef.current >= 3) setDataMode('cached');
@@ -182,10 +232,11 @@ export function useTracker() {
   // ---------- 手动刷新 ----------
   const hardRefresh = useCallback(async () => {
     try {
-      const q = await fetchQuotes(POOL.map((x) => x.tcode));
+      const { quotes: q, source } = await fetchQuotesWithFallback();
       setQuotes(q);
       setDataMode('live');
       setLastUpdate(new Date());
+      quoteSrcRef.current = source;
       const td = quoteDateOf(Object.values(q)[0]);
       const cache = loadBaselines();
       if (!cache || cache.tradeDate !== td) await rebuildBaselines(td);

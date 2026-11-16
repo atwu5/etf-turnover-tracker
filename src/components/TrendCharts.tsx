@@ -38,10 +38,10 @@ function filterRange<T extends { date: string }>(arr: T[], range: Range): T[] {
 }
 
 const AXIS = {
-  axisLine: { lineStyle: { color: '#cbd5e1' } },
+  axisLine: { lineStyle: { color: '#d8d0c0' } },
   axisTick: { show: false },
-  axisLabel: { color: '#64748b', fontSize: 10, formatter: (v: string) => monthLabel(v) },
-  splitLine: { lineStyle: { color: '#eef2f7' } },
+  axisLabel: { color: '#8c857a', fontSize: 10, formatter: (v: string) => monthLabel(v) },
+  splitLine: { lineStyle: { color: '#efe9dd' } },
 } as const;
 
 export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[]; historyDays: number }) {
@@ -56,16 +56,16 @@ export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[
     grid: { left: 8, right: 8, top: 24, bottom: 0, containLabel: true },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15,23,42,.92)',
+      backgroundColor: 'rgba(30,26,20,.94)',
       borderWidth: 0,
       textStyle: { color: '#fff', fontSize: 12 },
       valueFormatter: (v) => `${Number(v).toFixed(2)} 亿份`,
     },
     xAxis: { type: 'category', data: changeData.map((p) => p.date), ...AXIS },
-    yAxis: { type: 'value', name: '亿份', nameTextStyle: { color: '#94a3b8', fontSize: 10 }, ...AXIS },
+    yAxis: { type: 'value', name: '亿份', nameTextStyle: { color: '#a39b8b', fontSize: 10 }, ...AXIS },
     series: [{
       type: 'bar',
-      data: changeData.map((p) => ({ value: p.changeYi, itemStyle: { color: (p.changeYi ?? 0) >= 0 ? '#e03434' : '#0a9e6e' } })),
+      data: changeData.map((p) => ({ value: p.changeYi, itemStyle: { color: (p.changeYi ?? 0) >= 0 ? '#b3403a' : '#237a57' } })),
       barMaxWidth: 10,
     }],
   }), [changeData]);
@@ -74,26 +74,26 @@ export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[
     grid: { left: 8, right: 8, top: 24, bottom: 0, containLabel: true },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15,23,42,.92)',
+      backgroundColor: 'rgba(30,26,20,.94)',
       borderWidth: 0,
       textStyle: { color: '#fff', fontSize: 12 },
       valueFormatter: (v) => `${Number(v).toFixed(1)}`,
     },
     xAxis: { type: 'category', data: indexData.map((p) => p.date), ...AXIS },
-    yAxis: { type: 'value', scale: true, name: '指数', nameTextStyle: { color: '#94a3b8', fontSize: 10 }, ...AXIS },
+    yAxis: { type: 'value', scale: true, name: '指数', nameTextStyle: { color: '#a39b8b', fontSize: 10 }, ...AXIS },
     series: [
       {
         type: 'line',
         data: indexData.map((p) => p.indexVal),
         symbol: 'none',
-        lineStyle: { color: '#1B88EE', width: 2 },
-        areaStyle: { color: 'rgba(27,136,238,.08)' },
+        lineStyle: { color: '#b08d57', width: 2 },
+        areaStyle: { color: 'rgba(176,141,87,.10)' },
         markLine: {
           silent: true,
           symbol: 'none',
           data: [{ yAxis: 100 }],
-          lineStyle: { color: '#94a3b8', type: 'dashed' },
-          label: { formatter: '基期 100', color: '#64748b', fontSize: 10 },
+          lineStyle: { color: '#a39b8b', type: 'dashed' },
+          label: { formatter: '基期 100', color: '#8c857a', fontSize: 10 },
         },
       },
     ],
@@ -110,23 +110,23 @@ export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[
     <div className="grid gap-3 lg:grid-cols-2">
       <Card>
         <CardTitle sub={<RangeButtons value={r1} onChange={setR1} />}>每日份额变化估算</CardTitle>
-        <div className="px-2 pb-1 pt-2 text-[11px] text-slate-400">单位：亿份 · 正数净申购（红），负数净赎回（绿）</div>
+        <div className="px-2 pb-1 pt-2 text-[11px] text-stone-400">单位：亿份 · 正数净申购（红），负数净赎回（绿）</div>
         {changeData.length === 0 ? (
           <EmptyChart text="份额变化需至少两个交易日的份额记录，自首次使用起逐日积累。" />
         ) : (
           <div ref={c1} className="h-56 w-full" />
         )}
-        <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-relaxed text-slate-400">{note}</p>
+        <p className="border-t border-stone-100 px-4 py-2.5 text-[11px] leading-relaxed text-stone-400">{note}</p>
       </Card>
       <Card>
         <CardTitle sub={<RangeButtons value={r2} onChange={setR2} />}>加仓指数估算</CardTitle>
-        <div className="px-2 pb-1 pt-2 text-[11px] text-slate-400">区间首日 = 100 · 高于 100 为估算净加仓，低于 100 为估算净减仓</div>
+        <div className="px-2 pb-1 pt-2 text-[11px] text-stone-400">区间首日 = 100 · 高于 100 为估算净加仓，低于 100 为估算净减仓</div>
         {indexData.length === 0 ? (
           <EmptyChart text="加仓指数自首个份额记录日开始计算。" />
         ) : (
           <div ref={c2} className="h-56 w-full" />
         )}
-        <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-relaxed text-slate-400">
+        <p className="border-t border-stone-100 px-4 py-2.5 text-[11px] leading-relaxed text-stone-400">
           加仓指数 = 100 × 当日池内总份额 ÷ 区间首日总份额。不等于真实持仓比例：定期报告已停止披露前十大持有人，期初持仓不可验证，比例锚定会失真，故用指数刻画变化方向与幅度。
         </p>
       </Card>
@@ -141,7 +141,7 @@ function RangeButtons({ value, onChange }: { value: Range; onChange: (v: Range) 
         <button
           key={k}
           onClick={() => onChange(k)}
-          className={`rounded px-2 py-0.5 text-[11px] font-medium transition ${value === k ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          className={`rounded px-2 py-0.5 text-[11px] font-medium transition ${value === k ? 'bg-gold text-white' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}
         >
           {label}
         </button>
@@ -152,8 +152,8 @@ function RangeButtons({ value, onChange }: { value: Range; onChange: (v: Range) 
 
 function EmptyChart({ text }: { text: string }) {
   return (
-    <div className="flex h-56 flex-col items-center justify-center gap-2 text-slate-400">
-      <svg className="h-8 w-8 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <div className="flex h-56 flex-col items-center justify-center gap-2 text-stone-400">
+      <svg className="h-8 w-8 text-stone-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M3 3v18h18" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M7 14l4-4 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
       </svg>

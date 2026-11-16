@@ -47,24 +47,25 @@ export default function App() {
       {/* 页头 */}
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="font-serif text-[28px] font-bold tracking-tight text-ink">
             宽基 ETF 动向监测
-            <span className="ml-2 align-middle text-sm font-medium text-brand">Turnover & Flow</span>
+            <span className="text-gold-grad ml-3 align-middle text-[11px] font-semibold uppercase tracking-[0.3em]">Platinum & Flow</span>
           </h1>
-          <p className="mt-1 text-[13px] text-slate-500">
+          <p className="mt-1.5 text-[13px] tracking-wide text-ink-muted">
             宽基 ETF 成交额与资金动向 · 以公开量价数据观察平准类资金是否活跃
           </p>
         </div>
         <StatusPill phase={t.phase} tradeDate={t.tradeDate} lastUpdate={t.lastUpdate} />
       </header>
+      <div className="hairline-gold mt-3" />
 
       {/* 快照信息 */}
-      <div className="mt-2 text-xs text-slate-400">
+      <div className="mt-2 text-xs text-stone-400">
         交易日 {tradeDatePretty || '—'} · 重点监测 {coreCount} 只 + 扩展观察 {watchCount} 只 · 份额历史已积累 {t.sharesCount} 个交易日
       </div>
 
       {/* 工具栏 */}
-      <div className="sticky top-0 z-20 -mx-3 mt-3 bg-[#f3f6fb]/90 px-3 py-2 backdrop-blur sm:-mx-5 sm:px-5">
+      <div className="sticky top-0 z-20 -mx-3 mt-3 bg-[#f7f3ec]/90 px-3 py-2 backdrop-blur sm:-mx-5 sm:px-5">
         <FilterBar
           sort={sort} setSort={setSort}
           scope={scope} setScope={setScope}
@@ -78,7 +79,7 @@ export default function App() {
 
       {/* 基线计算进度 / 错误提示 */}
       {t.baselineTotal > 0 && t.baselineDone < t.baselineTotal && (
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-brand/30 bg-brand-soft px-4 py-2.5 text-[13px] text-brand-dark">
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold-soft px-4 py-2.5 text-[13px] text-gold-deep">
           <Spinner />
           正在拉取 K 线并计算基线（20 日均额 · 日内分布）：{t.baselineDone}/{t.baselineTotal} —— 每个交易日只需计算一次，之后走本地缓存
         </div>
@@ -91,7 +92,7 @@ export default function App() {
 
       {/* 主体 */}
       {t.booting && t.baselineTotal === 0 ? (
-        <div className="mt-16 flex flex-col items-center gap-3 text-slate-400">
+        <div className="mt-16 flex flex-col items-center gap-3 text-stone-400">
           <Spinner className="h-6 w-6" />
           <span className="text-sm">正在连接行情接口…</span>
         </div>
@@ -131,7 +132,7 @@ export default function App() {
         </main>
       )}
 
-      <footer className="mt-8 border-t border-slate-200 pt-4 text-center text-[11px] leading-relaxed text-slate-400">
+      <footer className="mt-8 border-t border-gold-hair/60 pt-4 text-center text-[11px] leading-relaxed text-ink-muted">
         数据来源：腾讯行情 qt.gtimg.cn（实时快照）+ 新浪 K 线 quotes.sina.cn（日内分布 / 均额）· 份额名单为 2025 年报历史标签
         <br />
         最近更新 {t.lastUpdate ? formatDateTime(t.lastUpdate) : '—'} · 仅供研究参考，不构成投资建议

@@ -21,7 +21,7 @@ export function FilterBar({
       <select
         value={sort}
         onChange={(e) => setSort(e.target.value as SortKey)}
-        className="h-8 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-700 outline-none focus:border-brand"
+        className="h-8 rounded-md border border-stone-300/80 bg-ivory-card px-2 text-[13px] text-ink-soft outline-none focus:border-gold"
         aria-label="排序"
       >
         <option value="huijin">汇金历史持仓 → 规模优先</option>
@@ -33,7 +33,7 @@ export function FilterBar({
       <select
         value={scope}
         onChange={(e) => setScope(e.target.value as ScopeKey)}
-        className="h-8 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-700 outline-none focus:border-brand"
+        className="h-8 rounded-md border border-stone-300/80 bg-ivory-card px-2 text-[13px] text-ink-soft outline-none focus:border-gold"
         aria-label="范围"
       >
         <option value="all">全部</option>
@@ -45,12 +45,12 @@ export function FilterBar({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="搜代码 / 名称 / 指数"
-        className="h-8 w-44 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-brand"
+        className="h-8 w-44 rounded-md border border-stone-300/80 bg-ivory-card px-2 text-[13px] text-ink-soft outline-none placeholder:text-stone-400 focus:border-gold"
       />
       <button
         onClick={onRefresh}
         disabled={refreshing}
-        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-[13px] font-medium text-white transition hover:bg-brand-dark disabled:opacity-60"
+        className="bg-gold-grad inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-white shadow-sm transition hover:brightness-105 disabled:opacity-60"
       >
         {refreshing ? (
           <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -64,14 +64,14 @@ export function FilterBar({
         )}
         立即刷新
       </button>
-      <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[13px] text-slate-600">
+      <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[13px] text-ink-soft">
         <input
           type="checkbox"
           checked={auto}
           onChange={(e) => setAuto(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-slate-300 accent-[#1B88EE]"
+          className="h-3.5 w-3.5 rounded border-stone-300 accent-[#b08d57]"
         />
-        自动刷新{auto && live && <span className="text-xs text-slate-400">（每 20 秒）</span>}
+        自动刷新{auto && live && <span className="text-xs text-ink-muted">（每 20 秒）</span>}
       </label>
     </div>
   );
