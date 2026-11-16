@@ -134,3 +134,31 @@ export function prevSharesOf(store: SharesStore, date: string, code: string): nu
 export function todayKey(): string {
   return yyyymmdd(new Date());
 }
+
+/**
+ * 合并外部导入的份额历史（种子/导入文件）。
+ * 只填补本地缺失的日期，绝不覆盖本地已积累数据（本地为准）。
+ * 接受两种格式：完整 SharesStore 或 简洁 map {date: {code: 亿份}}。
+ */
+export function mergeSharesStore(
+  store: SharesStore,
+  incoming: { byDate?: Record<string, Record<string, number>>; dates?: string[] } | null,
+): { merged: SharesStore; added: number } {
+  const byDate = { ...store.byDate };
+  let added = 0;
+  const src = incoming?.byDate ?? {};
+  for (const [d, rec] of Object.entries(src)) {
+    if (!/^\d{8}$/.test(d) || typeof rec !== 'object' || rec == null) continue;
+    if (byDate[d]) continue; // 本地已有，不覆盖
+    const clean: Record<string, number> = {};
+    for (const [c, v] of Object.entries(rec)) {
+      const n = Number(v);
+      if (/^\d{6}$/.test(c) && Number.isFinite(n) && n > 0) clean[c] = n;
+    }
+    if (Object.keys(clean).length > 0) {
+      byDate[d] = clean;
+      added++;
+    }
+  }
+  return { merged: { dates: Object.keys(byDate).sort(), byDate, stale: store.stale }, added };
+}

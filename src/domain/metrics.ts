@@ -181,10 +181,10 @@ export function weightedPct(items: { mktcapYi: number; pct: number }[]): number 
   return items.reduce((s, x) => s + x.mktcapYi * x.pct, 0) / cap;
 }
 
-/** 申赎估算② = (当日份额 − 上一交易日份额) × 现价（亿元） */
-export function subscrNetYi(sharesFen: number, prevSharesFen: number | null, price: number): number | null {
-  if (prevSharesFen == null || prevSharesFen <= 0 || price <= 0) return null;
-  return ((sharesFen - prevSharesFen) / 1e8) * price;
+/** 申赎估算② = (当日份额 − 上一交易日份额) × 现价（亿元）；单位均为亿份 */
+export function subscrNetYi(sharesYi: number, prevSharesYi: number | null, price: number): number | null {
+  if (prevSharesYi == null || prevSharesYi <= 0 || price <= 0) return null;
+  return (sharesYi - prevSharesYi) * price;
 }
 
 /**

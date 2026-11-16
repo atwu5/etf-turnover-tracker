@@ -1,10 +1,12 @@
-import type { SortKey, ScopeKey } from './EtfTable';
+import type { SortKey, ScopeKey, SortDir } from '../domain/sort';
+import { SORT_LABELS } from '../domain/sort';
 
 export function FilterBar({
-  sort, setSort, scope, setScope, query, setQuery, auto, setAuto, onRefresh, refreshing, phase,
+  sort, setSort, sortDir, scope, setScope, query, setQuery, auto, setAuto, onRefresh, refreshing, phase,
 }: {
   sort: SortKey;
   setSort: (v: SortKey) => void;
+  sortDir: SortDir;
   scope: ScopeKey;
   setScope: (v: ScopeKey) => void;
   query: string;
@@ -24,11 +26,9 @@ export function FilterBar({
         className="h-8 rounded-md border border-stone-300/80 bg-ivory-card px-2 text-[13px] text-ink-soft outline-none focus:border-gold"
         aria-label="排序"
       >
-        <option value="huijin">汇金历史持仓 → 规模优先</option>
-        <option value="amount">今日成交额</option>
-        <option value="ratio">放量倍数</option>
-        <option value="net">主动净买入</option>
-        <option value="mktcap">最新规模</option>
+        {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+          <option key={k} value={k}>{SORT_LABELS[k]}{sort === k && sortDir === 'asc' ? '（升序）' : ''}</option>
+        ))}
       </select>
       <select
         value={scope}

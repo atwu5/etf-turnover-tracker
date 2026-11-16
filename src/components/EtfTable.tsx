@@ -1,5 +1,6 @@
 import { GROUP_META, type Group } from '../config/pool';
 import { fmtRatio, fmtYi } from '../domain/metrics';
+import { arrangeRows, type SortKey, type SortDir, type ScopeKey, SORT_LABELS } from '../domain/sort';
 import { quoteHMOf } from '../data/tencent';
 import type { RowState } from '../hooks/useTracker';
 import { tradeDatePretty } from '../domain/format';
@@ -7,25 +8,30 @@ import { Badge, Card, DeltaText } from './ui';
 import { Sparkline } from './Sparkline';
 import type { ReactNode } from 'react';
 
-export type SortKey = 'huijin' | 'amount' | 'ratio' | 'net' | 'mktcap';
-export type ScopeKey = 'all' | 'core' | 'watch';
+export type { SortKey, SortDir, ScopeKey };
 
-function sortValue(r: RowState, key: SortKey): number {
-  switch (key) {
-    case 'amount': return r.amountYi ?? -1;
-    case 'ratio': return r.ratioSpot ?? -1;
-    case 'net': return r.netBuy ?? -Infinity;
-    case 'mktcap': return r.quote?.mktcapYi ?? -1;
-    case 'huijin': return (r.def.huijinYi ?? -1) * 1e6 + (r.quote?.mktcapYi ?? 0); // 汇金持仓优先，同档按规模
-  }
+/** 可点击排序的表头列 */
+function SortTh({ label, sortKey, sort, sortDir, onSort, align = 'right' }: {
+  label: string; sortKey: SortKey; sort: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void; align?: 'right' | 'left';
+}) {
+  const active = sort === sortKey;
+  return (
+    <th className={`px-3 py-2.5 font-medium ${align === 'right' ? 'text-right' : ''}`}>
+      <button
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 transition hover:text-gold-ink ${active ? 'text-gold-ink' : 'text-inherit'}`}
+        title={`按${SORT_LABELS[sortKey]}排序`}
+      >
+        {label}
+        <span className={`text-[9px] leading-none ${active ? 'opacity-100' : 'opacity-25'}`}>
+          {active ? (sortDir === 'desc' ? '▼' : '▲') : '▼'}
+        </span>
+      </button>
+    </th>
+  );
 }
 
-/** 组内排序后的行 */
-export function arrangeRows(rows: RowState[], sort: SortKey): RowState[] {
-  return [...rows].sort((a, b) => sortValue(b, sort) - sortValue(a, sort));
-}
-
-export function EtfTable({ rows, sort, fullDay }: { rows: RowState[]; sort: SortKey; fullDay: boolean }) {
+export function EtfTable({ rows, sort, sortDir, onSort, fullDay }: { rows: RowState[]; sort: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void; fullDay: boolean }) {
   const groups: Group[] = ['core', 'watch'];
   return (
     <Card className="overflow-hidden">
@@ -35,14 +41,23 @@ export function EtfTable({ rows, sort, fullDay }: { rows: RowState[]; sort: Sort
             <tr className="border-b border-gold-hair bg-gold-soft/40 text-left text-xs text-ink-muted">
               <th className="px-4 py-2.5 font-medium tracking-wide">ETF</th>
               <th className="px-3 py-2.5 font-medium">跟踪指数</th>
-              <th className="px-3 py-2.5 text-right font-medium">规模(亿)</th>
-              <th className="px-3 py-2.5 text-right font-medium">成交额(亿)</th>
-              <th className="px-3 py-2.5 text-right font-medium">{fullDay ? '全天倍数' : '同时点倍数'}</th>
-              <th className="px-3 py-2.5 text-right font-medium">主动净买入①</th>
-              <th className="px-3 py-2.5 text-right font-medium">涨跌</th>
-              <th className="px-3 py-2.5 text-right font-medium">份额(亿份)②</th>
-              <th className="px-3 py-2.5 font-medium">近30日成交额</th>
-              <th className="px-4 py-2.5 text-right font-medium">汇金持仓(25年报·亿份)</th>
+              <SortTh label="规模(亿)" sortKey="mktcap" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="成交额(亿)" sortKey="amount" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <SortTh label={fullDay ? '全天倍数' : '同时点倍数'} sortKey="ratio" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="主动净买入①" sortKey="net" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="涨跌" sortKey="pct" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="份额(亿份)②" sortKey="shares" sort={sort} sortDir={sortDir} onSort={onSort} />
+              <th className="px-3 py-2.5 font-medium">
+                <button
+                  onClick={() => onSort('hist')}
+                  className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 transition hover:text-gold-ink ${sort === 'hist' ? 'text-gold-ink' : 'text-inherit'}`}
+                  title="按近30日均成交额排序"
+                >
+                  近30日成交额
+                  <span className={`text-[9px] leading-none ${sort === 'hist' ? 'opacity-100' : 'opacity-25'}`}>{sort === 'hist' && sortDir === 'asc' ? '▲' : '▼'}</span>
+                </button>
+              </th>
+              <SortTh label="汇金持仓(25年报·亿份)" sortKey="huijin" sort={sort} sortDir={sortDir} onSort={onSort} />
             </tr>
           </thead>
           {groups.map((g) => {
@@ -57,7 +72,7 @@ export function EtfTable({ rows, sort, fullDay }: { rows: RowState[]; sort: Sort
                     <span className="ml-2 rounded border border-gold-hair/70 bg-ivory-card px-1.5 py-0.5 text-[11px] text-gold-ink">{grs.length} 只</span>
                   </td>
                 </tr>
-                {arrangeRows(grs, sort).map((r) => (
+                {arrangeRows(grs, sort, sortDir).map((r) => (
                   <TableRow key={r.def.code} r={r} />
                 ))}
                 {g === 'core' && <TotalRow rows={grs} />}
@@ -156,7 +171,7 @@ export function EtfCardList({ rows, fullDay }: { rows: RowState[]; fullDay: bool
               <span className="font-semibold text-stone-600">{GROUP_META[g].label}</span>
               <span className="ml-1.5 text-stone-400">{grs.length} 只</span>
             </div>
-            {arrangeRows(grs, 'huijin').map((r) => (
+            {arrangeRows(grs, 'huijin', 'desc').map((r) => (
               <Card key={r.def.code} className="p-3.5">
                 <div className="flex items-start justify-between gap-2">
                   <div>

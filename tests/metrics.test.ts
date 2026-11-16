@@ -64,9 +64,11 @@ describe('倍数与净买入', () => {
     expect(netBuyYi(100, 300, 10)).toBeCloseTo(-5);
     expect(netBuyYi(0, 0, 10)).toBeNull();
   });
-  it('申赎估算 = (今份额-昨份额)×现价（亿）', () => {
-    expect(subscrNetYi(500e8, 490e8, 4)).toBeCloseTo(40);
-    expect(subscrNetYi(500e8, null, 4)).toBeNull();
+  it('申赎估算 = (今份额-昨份额)×现价（亿份口径）；原站快照回归用例', () => {
+    expect(subscrNetYi(500, 490, 4)).toBeCloseTo(40);
+    expect(subscrNetYi(500, null, 4)).toBeNull();
+    // 原站参考快照：510300 份额 456.232877 vs 上一交易日 463.630877 亿份，价 4.07 → -30.11 亿
+    expect(subscrNetYi(456.232877, 463.630877, 4.07)).toBeCloseTo(-30.11, 1);
   });
   it('规模加权涨跌', () => {
     expect(weightedPct([{ mktcapYi: 1000, pct: -2 }, { mktcapYi: 1000, pct: 0 }])).toBeCloseTo(-1);

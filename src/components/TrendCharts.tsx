@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import * as echarts from 'echarts';
+import { useEffect, useMemo, useRef, useState } from 'react';import * as echarts from 'echarts';
 import type { ShareSeriesPoint } from '../domain/metrics';
 import { monthLabel } from '../domain/format';
 import { Card, CardTitle } from './ui';
@@ -44,7 +43,7 @@ const AXIS = {
   splitLine: { lineStyle: { color: '#efe9dd' } },
 } as const;
 
-export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[]; historyDays: number }) {
+export function TrendCharts({ series, historyDays, onImportShares, onExportShares }: { series: ShareSeriesPoint[]; historyDays: number; onImportShares: (json: { byDate?: Record<string, Record<string, number>>; dates?: string[] } | null) => number; onExportShares: () => string }) {
   const [r1, setR1] = useState<Range>('3m');
   const [r2, setR2] = useState<Range>('3m');
   const sparse = historyDays < 5;
@@ -99,6 +98,33 @@ export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[
     ],
   }), [indexData]);
 
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
+  const handleImport = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(String(reader.result));
+        const added = onImportShares(json);
+        setImportMsg(added > 0 ? `已导入 ${added} 个交易日的份额历史` : '没有新增日期（本地已有的日期不会被覆盖）');
+      } catch {
+        setImportMsg('导入失败：文件不是有效 JSON，或缺少 byDate 字段');
+      }
+      setTimeout(() => setImportMsg(null), 6000);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExport = () => {
+    const blob = new Blob([onExportShares()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ett-shares-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   const c1 = useEchart(changeOption, [changeOption]);
   const c2 = useEchart(indexOption, [indexOption]);
 
@@ -117,6 +143,25 @@ export function TrendCharts({ series, historyDays }: { series: ShareSeriesPoint[
           <div ref={c1} className="h-56 w-full" />
         )}
         <p className="border-t border-stone-100 px-4 py-2.5 text-[11px] leading-relaxed text-stone-400">{note}</p>
+        <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 px-4 py-2.5 text-[11px] text-stone-400">
+          <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = ''; }} />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="rounded border border-gold-hair/80 bg-gold-soft/60 px-2 py-0.5 font-medium text-gold-ink transition hover:bg-gold-soft"
+          >
+            导入历史数据
+          </button>
+          <button
+            onClick={handleExport}
+            className="rounded border border-stone-300/80 px-2 py-0.5 text-stone-500 transition hover:bg-stone-100"
+          >
+            导出已积累数据
+          </button>
+          {importMsg && <span className="text-gold-ink">{importMsg}</span>}
+          <span>
+            每日份额无公开浏览器数据源（交易所接口 CORS 封锁、iFinD/东财不覆盖），可从 Wind / iFinD / tushare(fund_share) 导出 JSON 后导入，或运行 scripts/backfill-shares.mjs
+          </span>
+        </div>
       </Card>
       <Card>
         <CardTitle sub={<RangeButtons value={r2} onChange={setR2} />}>加仓指数估算</CardTitle>

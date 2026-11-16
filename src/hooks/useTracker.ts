@@ -9,7 +9,7 @@ import { fetchQuotesEM } from '../data/eastmoney';
 import { fetchSinaDaily, fetchSinaKline, type Bar } from '../data/sina';
 import { poolAll } from '../data/jsonp';
 import {
-  loadBaselines, saveBaselines, loadShares, recordShares, prevSharesOf,
+  loadBaselines, saveBaselines, loadShares, saveShares, recordShares, prevSharesOf, mergeSharesStore,
   type SharesStore,
 } from '../data/store';
 import {
@@ -173,6 +173,20 @@ export function useTracker() {
       if (cache) setBaselines(cache.baselines);
       const store = loadShares();
       setSharesStore(store);
+      // 静默尝试加载随仓库分发的份额历史种子（scripts/backfill-shares.mjs 生成，文件不存在时忽略）
+      let seedStore = store;
+      try {
+        const r = await fetch(`${import.meta.env.BASE_URL}data/shares-history.json`);
+        if (r.ok) {
+          const seed = await r.json();
+          const { merged, added } = mergeSharesStore(store, seed);
+          if (added > 0) {
+            seedStore = merged;
+            setSharesStore(merged);
+            saveShares(merged);
+          }
+        }
+      } catch { /* 无种子文件，走本地积累 */ }
       try {
         const { quotes: q, source } = await fetchQuotesWithFallback();
         if (!alive) return;
@@ -191,7 +205,7 @@ export function useTracker() {
         if (needRebuild) {
           await rebuildBaselines(td);
         }
-        await recordSharesFor(q, td, store, setSharesStore, setPrevShareDateLabel);
+        await recordSharesFor(q, td, seedStore, setSharesStore, setPrevShareDateLabel);
       } catch (e) {
         if (!alive) return;
         setDataMode('error');
@@ -248,6 +262,20 @@ export function useTracker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharesStore, rebuildBaselines]);
 
+  // ---------- 份额历史导入 / 导出 ----------
+  const mergeShares = useCallback((incoming: { byDate?: Record<string, Record<string, number>>; dates?: string[] } | null): number => {
+    const { merged, added } = mergeSharesStore(sharesStore, incoming);
+    if (added > 0) {
+      setSharesStore(merged);
+      saveShares(merged);
+    }
+    return added;
+  }, [sharesStore]);
+
+  const exportShares = useCallback((): string => {
+    return JSON.stringify({ exportedAt: new Date().toISOString(), note: 'ett shares history (亿份); 格式 {byDate: {YYYYMMDD: {code: 份额亿份}}}', ...sharesStore }, null, 1);
+  }, [sharesStore]);
+
   // ---------- 派生行 ----------
   const rows: RowState[] = useMemo(() => {
     const hm = nowHHMM(now);
@@ -264,7 +292,7 @@ export function useTracker() {
       const mkt = MARKET_OF(def.code);
       const sharesStale = !!st[mkt];
       const prevShares = sharesYi != null ? prevSharesOf(sharesStore, tradeDate, def.code) : null;
-      const subscr = quote && sharesYi != null && !sharesStale ? subscrNetYi(quote.sharesFen, prevShares, quote.price) : null;
+      const subscr = quote && sharesYi != null && !sharesStale ? subscrNetYi(sharesYi, prevShares, quote.price) : null;
       return {
         def, quote, baseline, amountYi, ratioSpot, ratioDay, netBuy,
         sharesYi, subscr, subscrPrevDate: prevShareDateLabel, sharesStale, progress,
@@ -311,7 +339,7 @@ export function useTracker() {
     booting, ready: !booting, quotes, rows, pool, verdict, phase, tradeDate, fullDay,
     warnings, baselineDone, baselineTotal, dataMode, lastUpdate, now,
     auto, setAuto, hardRefresh, shareSeries, prevShareDateLabel,
-    sharesCount: sharesStore.dates.length,
+    sharesCount: sharesStore.dates.length, mergeShares, exportShares,
   };
 }
 

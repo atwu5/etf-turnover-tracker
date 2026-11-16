@@ -67,7 +67,15 @@ tests/                 Vitest 单元测试
 
 1. 在 `domain/metrics.ts` 增加纯函数并补测试；
 2. 在 `hooks/useTracker.ts` 的 `rows`/`pool` 派生处接入；
-3. 表格列在 `components/EtfTable.tsx` 增加一列即可。
+3. 表格列在 `components/EtfTable.tsx` 增加一列（可排序列同步在 `domain/sort.ts` 注册 sortKey）。
+
+## 份额历史导入 / 回填
+
+每日场内份额没有公开的浏览器可访问数据源（交易所接口 CORS 封锁、iFinD/东财不覆盖场内 ETF 份额），因此两张份额图表默认从首次使用起逐日积累。要快速填满历史：
+
+1. **导入 JSON**：图表卡「导入历史数据」按钮，接受 `{"byDate": {"YYYYMMDD": {"510300": 456.2, ...}}}` 格式（Wind / iFinD / tushare 导出后转换均可）；只填补缺失日期，不覆盖本地已积累数据；
+2. **回填脚本**：`TUSHARE_TOKEN=xxx node scripts/backfill-shares.mjs [天数]`（tushare Pro `fund_share` 接口，需 token，字段映射未经实测请对照官方文档），产出 `public/data/shares-history.json`，应用启动时自动加载种子；
+3. **导出**：「导出已积累数据」按钮随时备份。
 
 ## 已知局限（如实标注）
 

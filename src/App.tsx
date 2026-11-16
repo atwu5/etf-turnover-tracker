@@ -3,7 +3,8 @@ import { useTracker } from './hooks/useTracker';
 import { StatusPill } from './components/StatusPill';
 import { VerdictCard, KpiGrid } from './components/VerdictCard';
 import { FilterBar } from './components/FilterBar';
-import { EtfTable, EtfCardList, type SortKey, type ScopeKey } from './components/EtfTable';
+import { EtfTable, EtfCardList, type ScopeKey } from './components/EtfTable';
+import type { SortKey, SortDir } from './domain/sort';
 import { TrendCharts } from './components/TrendCharts';
 import { NotesSection } from './components/NotesSection';
 import { Spinner } from './components/ui';
@@ -12,7 +13,13 @@ import { quoteHMOf } from './data/tencent';
 
 export default function App() {
   const t = useTracker();
-  const [sort, setSort] = useState<SortKey>('huijin');
+  const [sort, setSortState] = useState<SortKey>('huijin');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const setSort = (k: SortKey) => setSortState(k); // 下拉选择默认降序
+  const onSort = (k: SortKey) => {
+    if (k === sort) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortState(k); setSortDir('desc'); }
+  };
   const [scope, setScope] = useState<ScopeKey>('all');
   const [query, setQuery] = useState('');
 
@@ -67,7 +74,7 @@ export default function App() {
       {/* 工具栏 */}
       <div className="sticky top-0 z-20 -mx-3 mt-3 bg-[#f7f3ec]/90 px-3 py-2 backdrop-blur sm:-mx-5 sm:px-5">
         <FilterBar
-          sort={sort} setSort={setSort}
+          sort={sort} setSort={setSort} sortDir={sortDir}
           scope={scope} setScope={setScope}
           query={query} setQuery={setQuery}
           auto={t.auto} setAuto={t.setAuto}
@@ -118,11 +125,11 @@ export default function App() {
             tradeDate={t.tradeDate}
             fullDay={t.fullDay}
           />
-          <TrendCharts series={t.shareSeries} historyDays={t.sharesCount} />
+          <TrendCharts series={t.shareSeries} historyDays={t.sharesCount} onImportShares={t.mergeShares} onExportShares={t.exportShares} />
 
           {/* PC 表格 / 移动卡片 */}
           <div className="hidden md:block">
-            <EtfTable rows={rows} sort={sort} fullDay={t.fullDay} />
+            <EtfTable rows={rows} sort={sort} sortDir={sortDir} onSort={onSort} fullDay={t.fullDay} />
           </div>
           <div className="md:hidden">
             <EtfCardList rows={rows} fullDay={t.fullDay} />
