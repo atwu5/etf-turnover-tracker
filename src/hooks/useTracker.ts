@@ -1,0 +1,314 @@
+/**
+ * 编排层：行情轮询、基线计算（增量）、份额历史积累、派生指标。
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CORE_POOL, POOL, type EtfDef } from '../config/pool';
+import { fetchQuotes, fetchTencentDaily, quoteDateOf, type Quote } from '../data/tencent';
+import { fetchSinaDaily, fetchSinaKline, type Bar } from '../data/sina';
+import { poolAll } from '../data/jsonp';
+import {
+  loadBaselines, saveBaselines, loadShares, recordShares, prevSharesOf,
+  type SharesStore,
+} from '../data/store';
+import {
+  buildBaselineFrom5m, progressAt, spotRatio, dayRatio, netBuyYi, weightedPct, subscrNetYi,
+  detectStaleMarkets, buildShareSeries, makeVerdict, type Baseline, type ShareSeriesPoint, groupByDay,
+} from '../domain/metrics';
+import { isFullDayData, isLivePhase, nowHHMM, phaseOf, type SessionPhase } from '../domain/session';
+
+export interface RowState {
+  def: EtfDef;
+  quote: Quote | null;
+  baseline: Baseline | null;
+  amountYi: number | null;
+  ratioSpot: number | null;
+  ratioDay: number | null;
+  netBuy: number | null;
+  sharesYi: number | null;
+  subscr: number | null;
+  subscrPrevDate: string | null;
+  sharesStale: boolean;
+  progress: number;
+}
+
+const K_DALEN_5M = 1500; // ≈ 30 个交易日的 5 分钟 K
+const K_DALEN_DAILY = 60;
+const POLL_MS = 20_000;
+const MARKET_OF = (code: string): 'sh' | 'sz' => (POOL.find((x) => x.code === code)?.tcode.startsWith('sh') ? 'sh' : 'sz');
+
+export function useTracker() {
+  const [booting, setBooting] = useState(true);
+  const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [baselines, setBaselines] = useState<Record<string, Baseline>>({});
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [baselineDone, setBaselineDone] = useState(0);
+  const [baselineTotal, setBaselineTotal] = useState(0);
+  const [dataMode, setDataMode] = useState<'live' | 'cached' | 'error'>('live');
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [auto, setAuto] = useState(true);
+  const [sharesStore, setSharesStore] = useState<SharesStore>(() => loadShares());
+  const [prevShareDateLabel, setPrevShareDateLabel] = useState<string | null>(null);
+  const quoteErrRef = useRef(0);
+
+  const phase: SessionPhase = useMemo(() => {
+    const firstQuote = Object.values(quotes)[0];
+    return phaseOf(now, firstQuote ? quoteDateOf(firstQuote) : '');
+  }, [now, quotes]);
+
+  const tradeDate = useMemo(() => {
+    const firstQuote = Object.values(quotes)[0];
+    return firstQuote ? quoteDateOf(firstQuote) : '';
+  }, [quotes]);
+
+  // ---------- 基线计算（新浪 5 分 K → 新浪日 K → 腾讯日 K 三级降级） ----------
+  const rebuildBaselines = useCallback(async (forDate: string) => {
+    setBaselineTotal(POOL.length);
+    setBaselineDone(0);
+    const results: Record<string, Baseline> = {};
+    const warns: string[] = [];
+    const oldCache = loadBaselines();
+    const { results: per } = await poolAll(POOL, 5, async (def) => {
+      let primaryErr = '';
+      try {
+        const bars = await fetchSinaKline(def.tcode, 5, K_DALEN_5M);
+        const b = buildBaselineFrom5m(bars, forDate);
+        if (b) {
+          const byDay = groupByDay(bars);
+          const todayBars = byDay.get(forDate);
+          return { ...b, tailToday: todayBars ? tailRatioOrNull(todayBars) : undefined } as Baseline;
+        }
+        primaryErr = '5 分钟 K 数据不足';
+      } catch (e) {
+        primaryErr = `5 分钟 K 拉取失败（${e instanceof Error ? e.message : e}）`;
+      }
+      // 降级 1：新浪日 K（成交额=量×价估算，shape 沿用旧缓存）
+      try {
+        const daily = await fetchSinaDaily(def.tcode, K_DALEN_DAILY);
+        const b = baselineFromDaily(daily, forDate, 'sinaDaily');
+        if (b) {
+          warns.push(`${def.name}: ${primaryErr}，使用日 K 估算均额（日内分布沿用缓存）`);
+          return b;
+        }
+      } catch { /* 降级 2 */ }
+      // 降级 2：腾讯日 K
+      try {
+        const daily = await fetchTencentDaily(def.tcode, K_DALEN_DAILY);
+        const b = baselineFromDaily(daily.map((x) => ({ date: x.date, hm: '15:00', close: x.close, volume: x.volumeLots * 100 })), forDate, 'tencentDaily');
+        if (b) {
+          warns.push(`${def.name}: ${primaryErr}，使用腾讯日 K 估算均额（日内分布沿用缓存）`);
+          return b;
+        }
+      } catch { /* 全部失败 */ }
+      warns.push(`${def.name}: ${primaryErr}，且日 K 降级失败，沿用上次缓存`);
+      return null;
+    }, (done, _total) => setBaselineDone(done));
+    per.forEach((b, i) => {
+      if (b) {
+        const code = POOL[i].code;
+        // 降级路径无日内分布：沿用旧缓存的 shape / tailBase
+        const old = oldCache?.baselines[code];
+        if (!b.shape.length && old?.shape.length) {
+          results[code] = { ...b, shape: old.shape, tailBase: old.tailBase || b.tailBase };
+        } else {
+          results[code] = b;
+        }
+      }
+    });
+    setBaselines((old) => {
+      const merged = { ...old, ...results };
+      saveBaselines({ tradeDate: forDate, fetchedAt: new Date().toISOString(), baselines: merged, warnings: warns });
+      return merged;
+    });
+    setWarnings(warns);
+  }, []);
+
+  // ---------- 首次启动 ----------
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const cache = loadBaselines();
+      if (cache) setBaselines(cache.baselines);
+      const store = loadShares();
+      setSharesStore(store);
+      try {
+        const q = await fetchQuotes(POOL.map((x) => x.tcode));
+        if (!alive) return;
+        setQuotes(q);
+        setDataMode('live');
+        setLastUpdate(new Date());
+        quoteErrRef.current = 0;
+        const td = quoteDateOf(Object.values(q)[0]);
+        // 缓存失效判定：交易日变化，或缓存中多数基线缺日内分布（上次全量降级）→ 重算
+        const shapeless = cache ? Object.values(cache.baselines).filter((b) => !b.shape || b.shape.length === 0).length : POOL.length;
+        const needRebuild = !cache || cache.tradeDate !== td || shapeless > POOL.length * 0.3;
+        if (needRebuild) {
+          await rebuildBaselines(td);
+        }
+        await recordSharesFor(q, td, store, setSharesStore, setPrevShareDateLabel);
+      } catch (e) {
+        if (!alive) return;
+        setDataMode('error');
+        setWarnings((w) => [...w, '行情接口获取失败，展示缓存数据；可点击「立即刷新」重试']);
+      }
+      if (alive) setBooting(false);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------- 定时器：20 秒时钟推进 + 自动刷新行情 ----------
+  useEffect(() => {
+    const t = window.setInterval(async () => {
+      setNow(new Date());
+      const ph = phaseOf(new Date(), tradeDate);
+      if (auto && isLivePhase(ph)) {
+        try {
+          const q = await fetchQuotes(POOL.map((x) => x.tcode));
+          setQuotes(q);
+          setDataMode('live');
+          setLastUpdate(new Date());
+          quoteErrRef.current = 0;
+        } catch {
+          quoteErrRef.current++;
+          if (quoteErrRef.current >= 3) setDataMode('cached');
+        }
+      }
+    }, POLL_MS);
+    return () => window.clearInterval(t);
+  }, [auto, tradeDate]);
+
+  // ---------- 手动刷新 ----------
+  const hardRefresh = useCallback(async () => {
+    try {
+      const q = await fetchQuotes(POOL.map((x) => x.tcode));
+      setQuotes(q);
+      setDataMode('live');
+      setLastUpdate(new Date());
+      const td = quoteDateOf(Object.values(q)[0]);
+      const cache = loadBaselines();
+      if (!cache || cache.tradeDate !== td) await rebuildBaselines(td);
+      await recordSharesFor(q, td, sharesStore, setSharesStore, setPrevShareDateLabel);
+    } catch {
+      setDataMode('cached');
+      setWarnings((w) => [...w.slice(-4), '刷新失败：行情接口暂不可用']);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharesStore, rebuildBaselines]);
+
+  // ---------- 派生行 ----------
+  const rows: RowState[] = useMemo(() => {
+    const hm = nowHHMM(now);
+    return POOL.map((def) => {
+      const quote = quotes[def.tcode] ?? null;
+      const baseline = baselines[def.code] ?? null;
+      const amountYi = quote ? quote.amountWan / 1e4 : null;
+      const progress = baseline ? progressAt(baseline.shape, hm, phase) : 0;
+      const ratioSpot = amountYi != null && baseline ? spotRatio(amountYi, baseline.avg20Yi, progress) : null;
+      const ratioDay = amountYi != null && baseline ? dayRatio(amountYi, baseline.avg20Yi) : null;
+      const netBuy = quote && amountYi != null ? netBuyYi(quote.outerLots, quote.innerLots, amountYi) : null;
+      const sharesYi = quote && quote.sharesFen > 0 ? quote.sharesFen / 1e8 : null;
+      const st = sharesStore.stale[tradeDate] ?? {};
+      const mkt = MARKET_OF(def.code);
+      const sharesStale = !!st[mkt];
+      const prevShares = sharesYi != null ? prevSharesOf(sharesStore, tradeDate, def.code) : null;
+      const subscr = quote && sharesYi != null && !sharesStale ? subscrNetYi(quote.sharesFen, prevShares, quote.price) : null;
+      return {
+        def, quote, baseline, amountYi, ratioSpot, ratioDay, netBuy,
+        sharesYi, subscr, subscrPrevDate: prevShareDateLabel, sharesStale, progress,
+      };
+    });
+  }, [quotes, baselines, now, phase, sharesStore, tradeDate, prevShareDateLabel]);
+
+  // ---------- 池级汇总（仅重点监测池） ----------
+  const pool = useMemo(() => {
+    const coreRows = rows.filter((r) => r.def.group === 'core');
+    const withBase = coreRows.filter((r) => r.baseline && r.amountYi != null);
+    const totalAmount = coreRows.reduce((s, r) => s + (r.amountYi ?? 0), 0);
+    const denom = withBase.reduce((s, r) => s + (r.baseline!.avg20Yi * r.progress), 0);
+    const avgSum = withBase.reduce((s, r) => s + r.baseline!.avg20Yi, 0);
+    const progressPct = avgSum > 0 ? (denom / avgSum) * 100 : null;
+    const ratio = denom > 0 ? totalAmount / denom : null;
+    const netBuy = coreRows.reduce((s, r) => s + (r.netBuy ?? 0), 0);
+    const netBuyKnown = coreRows.some((r) => r.netBuy != null);
+    const wPct = weightedPct(coreRows.filter((r) => r.quote).map((r) => ({ mktcapYi: r.quote!.mktcapYi, pct: r.quote!.pct })));
+    const dayRatioPool = avgSum > 0 ? totalAmount / avgSum : null;
+    // 池级当日尾盘占比（收盘后）：按成交额加权各标的尾盘占比
+    const tailVals = coreRows.filter((r) => r.baseline?.tailToday != null && r.amountYi);
+    const tailToday = tailVals.length
+      ? tailVals.reduce((s, r) => s + (r.baseline!.tailToday as number) * (r.amountYi as number), 0) / tailVals.reduce((s, r) => s + (r.amountYi as number), 0)
+      : null;
+    const tailBase = withBase.length
+      ? withBase.reduce((s, r) => s + r.baseline!.tailBase * r.baseline!.avg20Yi, 0) / withBase.reduce((s, r) => s + r.baseline!.avg20Yi, 0)
+      : null;
+    return { totalAmount, ratio, netBuy: netBuyKnown ? netBuy : null, wPct, progressPct, dayRatioPool, tailToday, tailBase, count: coreRows.length };
+  }, [rows]);
+
+  const fullDay = isFullDayData(phase);
+  const verdict = useMemo(
+    () => makeVerdict({ phase, ratio: pool.ratio, netBuy: pool.netBuy, progressPct: pool.progressPct, tailToday: pool.tailToday, tailBase: pool.tailBase, fullDay }),
+    [phase, pool],
+  );
+
+  // ---------- 份额序列（图表用，重点监测池） ----------
+  const shareSeries: ShareSeriesPoint[] = useMemo(() => {
+    return buildShareSeries(sharesStore.dates, sharesStore.byDate, sharesStore.stale, CORE_POOL.map((x) => x.code), MARKET_OF);
+  }, [sharesStore]);
+
+  return {
+    booting, ready: !booting, quotes, rows, pool, verdict, phase, tradeDate, fullDay,
+    warnings, baselineDone, baselineTotal, dataMode, lastUpdate, now,
+    auto, setAuto, hardRefresh, shareSeries, prevShareDateLabel,
+    sharesCount: sharesStore.dates.length,
+  };
+}
+
+// ---------- 内部工具 ----------
+
+function tailRatioOrNull(bars: Bar[]): number | null {
+  const total = bars.reduce((s, b) => s + (b.amount ?? b.volume * b.close), 0);
+  if (total <= 0 || bars[bars.length - 1]?.hm !== '15:00') return null;
+  const tail = bars
+    .filter((b) => { const m = Number(b.hm.slice(0, 2)) * 60 + Number(b.hm.slice(3)); return m > 870 && m <= 900; })
+    .reduce((s, b) => s + (b.amount ?? b.volume * b.close), 0);
+  return tail / total;
+}
+
+/** 日 K 降级基线：avg20 / hist30 估算；shape 沿用旧缓存（调用方合并） */
+function baselineFromDaily(
+  bars: { date: string; hm: string; close: number; volume: number }[],
+  forDate: string,
+  source: 'sinaDaily' | 'tencentDaily',
+): Baseline | null {
+  const days = new Map<string, { close: number; volume: number }>();
+  bars.forEach((b) => days.set(b.date, b));
+  const dates = [...days.keys()].sort();
+  const prevDays = dates.filter((d) => d < forDate).slice(-20);
+  if (prevDays.length === 0) return null;
+  const amountOf = (d: string) => { const x = days.get(d)!; return (x.volume * x.close) / 1e8; };
+  const avg20Yi = prevDays.reduce((s, d) => s + amountOf(d), 0) / prevDays.length;
+  const hist30 = dates.filter((d) => d <= forDate).slice(-30).map((d) => ({ date: d, amountYi: amountOf(d) }));
+  // 尾盘均值与 shape 未知 → 置 0/空，调用方合并旧缓存
+  return { avg20Yi, shape: [], tailBase: 0, hist30, daysUsed: prevDays.length, source };
+}
+
+async function recordSharesFor(
+  q: Record<string, Quote>,
+  tradeDate: string,
+  store: SharesStore,
+  setStore: (s: SharesStore) => void,
+  setLabel: (s: string | null) => void,
+): Promise<void> {
+  if (!tradeDate || !q[POOL[0].tcode]) return;
+  const rec: Record<string, number> = {};
+  for (const def of POOL) {
+    const quote = q[def.tcode];
+    if (quote?.sharesFen > 0) rec[def.code] = quote.sharesFen / 1e8;
+  }
+  const prevDate = store.dates.filter((d) => d < tradeDate).pop() ?? null;
+  const staleMark = prevDate ? detectStaleMarkets(rec, store.byDate[prevDate] ?? {}, MARKET_OF) : null;
+  const { changed, prevDate: usedPrev } = recordShares(store, tradeDate, rec, staleMark);
+  if (changed) setStore({ ...store });
+  setLabel(usedPrev);
+}

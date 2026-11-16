@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-[#f3f6fb] text-slate-800 antialiased;
+  font-feature-settings: 'tnum';
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded bg-slate-300;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
