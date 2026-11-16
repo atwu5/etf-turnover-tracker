@@ -1,4 +1,4 @@
-import { fmtRatio, fmtSigned, type Verdict } from '../domain/metrics';
+import { fmtRatio, fmtSigned, VERDICT_RULE, type Verdict } from '../domain/metrics';
 import { Card } from './ui';
 
 const TONE_META: Record<Verdict['tone'], { chip: string; bar: string }> = {
@@ -43,6 +43,7 @@ export function VerdictCard({
             {verdict.headline}
           </h2>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">{verdict.detail}</p>
+          <p className="mt-1.5 text-[11px] text-ink-muted">判定口径（自定假设）：{VERDICT_RULE} → 有上班；其余 → 没上班</p>
         </div>
         <div className="flex shrink-0 flex-col justify-center gap-1 rounded-lg border border-dashed border-gold-hair bg-gold-soft/50 px-6 py-3 text-center">
           <div className="text-gold-grad num font-serif text-[40px] font-bold leading-none tracking-tight">{fmtRatio(ratio)}</div>

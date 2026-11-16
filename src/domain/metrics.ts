@@ -267,12 +267,15 @@ export function buildShareSeries(
   return out;
 }
 
-/** 结论文案（阈值分级为本站假设，已在 SPEC 标注） */
+/** 结论文案：二元判定（原站内部阈值不可见，阈值为本站自定假设，已在 SPEC 标注） */
 export interface Verdict {
   headline: string;
   detail: string;
   tone: 'calm' | 'warm' | 'hot' | 'quiet' | 'na';
 }
+
+/** 判定阈值：同时点倍数 ≥1.5 且主动净买入为正，或主动净买入 ≥50 亿 → 有上班 */
+export const VERDICT_RULE = '同时点倍数 ≥ 1.5 且主动净买入为正，或主动净买入 ≥ 50 亿';
 
 export function makeVerdict(args: {
   phase: 'pre' | 'am' | 'lunch' | 'pm' | 'after' | 'closed';
@@ -284,19 +287,14 @@ export function makeVerdict(args: {
   fullDay: boolean;
 }): Verdict {
   const { phase, ratio, netBuy, progressPct, tailToday, tailBase, fullDay } = args;
-  if (phase === 'pre') {
-    return { headline: '盘前等待', detail: '今日尚未开盘，下方展示上一交易日数据。', tone: 'na' };
-  }
-  if (ratio == null) {
-    return { headline: '基准计算中', detail: '20 日均额与日内分布仍在计算，请稍候。', tone: 'na' };
-  }
-  let tone: Verdict['tone'];
-  let word: string;
-  if (ratio >= 1.5) { tone = 'hot'; word = fullDay ? '显著放量' : '显著放量，疑似集中买入'; }
-  else if (ratio >= 1.1) { tone = 'warm'; word = '温和放量'; }
-  else if (ratio >= 0.85) { tone = 'calm'; word = '量能平稳'; }
-  else { tone = 'quiet'; word = fullDay ? '明显缩量' : '没看出集中买入迹象'; }
+  // 二元判定：只有「汪汪队有上班 / 汪汪队没上班」两个答案
+  const working = ratio != null && ((ratio >= 1.5 && (netBuy ?? 0) > 0) || (netBuy ?? 0) >= 50);
+  const headline = working ? '汪汪队有上班' : '汪汪队没上班';
+  const tone: Verdict['tone'] = ratio == null ? 'na' : working ? 'hot' : 'calm';
 
+  const parts: string[] = [];
+  if (phase === 'pre') parts.push('今日尚未开盘，暂无信号，按未上班展示');
+  if (ratio == null) parts.push('20日均额与日内分布基线仍在计算，暂按未上班展示');
   const netTxt =
     netBuy == null
       ? ''
@@ -305,21 +303,24 @@ export function makeVerdict(args: {
         : Math.abs(netBuy) >= 5
           ? `主动净买入 ${fmtSigned(netBuy)} 亿元`
           : '主动买卖基本均衡，量价都平静';
-
-  const baseTxt = fullDay
-    ? `全天成交额为 20 日均额的 ${ratio.toFixed(2)} 倍`
-    : `成交额为历史同时点均值的 ${ratio.toFixed(2)} 倍（历史平均已走完全天 ${(progressPct ?? 0).toFixed(1)}%，分母已同比例缩小）`;
-
-  let tailTxt = '';
+  if (ratio != null) {
+    parts.push(
+      fullDay
+        ? `全天成交额为 20 日均额的 ${ratio.toFixed(2)} 倍`
+        : `成交额为历史同时点均值的 ${ratio.toFixed(2)} 倍（历史平均已走完全天 ${(progressPct ?? 0).toFixed(1)}%，分母已同比例缩小）`,
+    );
+  }
+  if (netTxt) parts.push(netTxt);
   if (fullDay && tailToday != null && tailBase != null && tailBase > 0) {
     const r = tailToday / tailBase;
-    tailTxt = r >= 1.3
-      ? `尾盘成交占比 ${(tailToday * 100).toFixed(1)}%，明显高于 20 日均值 ${(tailBase * 100).toFixed(1)}%，尾盘有集中动作`
-      : `尾盘成交占比 ${(tailToday * 100).toFixed(1)}%，与 20 日均值 ${(tailBase * 100).toFixed(1)}% 相当，尾盘平静`;
+    parts.push(
+      r >= 1.3
+        ? `尾盘成交占比 ${(tailToday * 100).toFixed(1)}%，明显高于 20 日均值 ${(tailBase * 100).toFixed(1)}%，尾盘有集中动作`
+        : `尾盘成交占比 ${(tailToday * 100).toFixed(1)}%，与 20 日均值 ${(tailBase * 100).toFixed(1)}% 相当，尾盘平静`,
+    );
   }
-
-  const detail = [baseTxt, netTxt, tailTxt].filter(Boolean).join('；') + '。（主动净买入为逐笔方向推算，非资金净流入）';
-  return { headline: word, detail, tone };
+  parts.push('（主动净买入为逐笔方向推算，非资金净流入）');
+  return { headline, detail: parts.join('；'), tone };
 }
 
 export function fmtSigned(n: number, digits = 2): string {

@@ -165,16 +165,37 @@ describe('份额序列与加仓指数', () => {
   });
 });
 
-describe('结论文案', () => {
-  it('盘中放量与缩量', () => {
-    const hot = makeVerdict({ phase: 'am', ratio: 1.8, netBuy: 25, progressPct: 50, tailToday: null, tailBase: null, fullDay: false });
-    expect(hot.headline).toContain('显著放量');
-    const quiet = makeVerdict({ phase: 'pm', ratio: 0.6, netBuy: -2, progressPct: 80, tailToday: null, tailBase: null, fullDay: false });
-    expect(quiet.headline).toContain('没看出');
+describe('结论文案（二元判定）', () => {
+  const base = { progressPct: 50, tailToday: null, tailBase: null, fullDay: false } as const;
+  it('显著放量且买盘主导 → 有上班', () => {
+    const v = makeVerdict({ ...base, phase: 'am', ratio: 1.8, netBuy: 25 });
+    expect(v.headline).toBe('汪汪队有上班');
+    expect(v.tone).toBe('hot');
   });
-  it('盘前与基准缺失', () => {
-    expect(makeVerdict({ phase: 'pre', ratio: null, netBuy: null, progressPct: null, tailToday: null, tailBase: null, fullDay: false }).headline).toBe('盘前等待');
-    expect(makeVerdict({ phase: 'am', ratio: null, netBuy: null, progressPct: null, tailToday: null, tailBase: null, fullDay: false }).headline).toBe('基准计算中');
+  it('温和放量但未达阈值 → 没上班', () => {
+    const v = makeVerdict({ ...base, phase: 'pm', ratio: 1.2, netBuy: 8 });
+    expect(v.headline).toBe('汪汪队没上班');
+    expect(v.tone).toBe('calm');
+  });
+  it('倍数不高但净买入 ≥50 亿 → 有上班', () => {
+    const v = makeVerdict({ ...base, phase: 'pm', ratio: 0.9, netBuy: 60 });
+    expect(v.headline).toBe('汪汪队有上班');
+  });
+  it('放量但卖盘主导（净买入为负）→ 没上班', () => {
+    const v = makeVerdict({ ...base, phase: 'am', ratio: 1.8, netBuy: -30 });
+    expect(v.headline).toBe('汪汪队没上班');
+  });
+  it('净买入恰在 50 亿边界 → 有上班', () => {
+    expect(makeVerdict({ ...base, phase: 'am', ratio: 1.0, netBuy: 50 }).headline).toBe('汪汪队有上班');
+    expect(makeVerdict({ ...base, phase: 'am', ratio: 1.0, netBuy: 49.9 }).headline).toBe('汪汪队没上班');
+  });
+  it('盘前与基准缺失 → 没上班（附说明）', () => {
+    const pre = makeVerdict({ phase: 'pre', ratio: null, netBuy: null, ...base });
+    expect(pre.headline).toBe('汪汪队没上班');
+    expect(pre.detail).toContain('尚未开盘');
+    const calc = makeVerdict({ phase: 'am', ratio: null, netBuy: null, ...base });
+    expect(calc.headline).toBe('汪汪队没上班');
+    expect(calc.detail).toContain('基线仍在计算');
   });
   it('收盘后包含尾盘对比', () => {
     const v = makeVerdict({ phase: 'after', ratio: 1.2, netBuy: 8, progressPct: 100, tailToday: 0.3, tailBase: 0.15, fullDay: true });
