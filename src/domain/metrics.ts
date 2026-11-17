@@ -274,8 +274,96 @@ export interface Verdict {
   tone: 'calm' | 'warm' | 'hot' | 'quiet' | 'na';
 }
 
-/** 判定阈值：同时点倍数 ≥1.5 且主动净买入为正，或主动净买入 ≥50 亿 → 有上班 */
-export const VERDICT_RULE = '同时点倍数 ≥ 1.5 且主动净买入为正，或主动净买入 ≥ 50 亿';
+/** 判定阈值：全天口径（同时点倍数≥1.5且净买入>0，或净买入≥50亿），或任一完整 10 分钟窗口放量≥2×且成交≥10亿 → 有上班 */
+export const VERDICT_RULE =
+  '全天同时点倍数 ≥ 1.5 且主动净买入为正，或主动净买入 ≥ 50 亿；或任一完整 10 分钟窗口放量 ≥ 2× 且成交 ≥ 10 亿';
+
+export const WINDOW_RATIO_TRIGGER = 2.0;
+export const WINDOW_MIN_AMOUNT_YI = 10;
+
+/** 10 分钟窗口（09:30–11:30 12 个 + 13:00–15:00 12 个） */
+export const WINDOWS: [string, string][] = (() => {
+  const out: [string, string][] = [];
+  let m1 = 9 * 60 + 30;
+  let m2 = m1 + 10;
+  for (let i = 0; i < 24; i++) {
+    out.push([hhmm(m1), hhmm(m2)]);
+    if (m2 === 11 * 60 + 30) {
+      m1 = 13 * 60;
+      m2 = m1 + 10;
+    } else {
+      m1 = m2;
+      m2 += 10;
+    }
+  }
+  return out;
+})();
+
+export interface WindowStat {
+  startHHMM: string;
+  endHHMM: string;
+  label: string;
+  /** 当日该窗口实际成交额（亿，重点池合计） */
+  actualYi: number;
+  /** 期望成交额 = Σ 20日均额 × 该窗口历史占比（亿） */
+  expectedYi: number;
+  ratio: number | null;
+  triggered: boolean;
+  /** 窗口是否已走完 */
+  complete: boolean;
+}
+
+/**
+ * 10 分钟窗口放量判定（重点池合计）。
+ * 期望 = Σ(各标的 20日均额 × 该窗口历史占比)，占比来自日内分布 shape（近 20 日均值）。
+ * 窗口净买入无法从公开分钟数据取得（外盘/内盘为全日累计），故窗口只判放量。
+ */
+export function buildWindowStats(
+  funds: { avg20Yi: number; shape: [string, number][] }[],
+  todayBars: Record<string, Bar[]>,
+  tradeDate: string,
+  nowHHMMStr: string,
+  phase: 'pre' | 'am' | 'lunch' | 'pm' | 'after' | 'closed',
+): WindowStat[] {
+  const nowM = minutesOf(nowHHMMStr);
+  const cumAt = (shape: [string, number][], t: string): number => {
+    let v = 0;
+    for (const [label, x] of shape) {
+      if (minutesOf(label) <= minutesOf(t)) v = x;
+      else break;
+    }
+    return v;
+  };
+  const out: WindowStat[] = [];
+  for (const [a, b] of WINDOWS) {
+    const aM = minutesOf(a);
+    const bM = minutesOf(b);
+    let actual = 0;
+    let expected = 0;
+    for (const f of funds) {
+      if (!(f.avg20Yi > 0) || f.shape.length === 0) continue;
+      expected += f.avg20Yi * (cumAt(f.shape, b) - cumAt(f.shape, a));
+    }
+    for (const bars of Object.values(todayBars)) {
+      for (const bar of bars) {
+        if (bar.date !== tradeDate) continue;
+        const m = minutesOf(bar.hm);
+        if (m > aM && m <= bM) actual += barAmountYi(bar);
+      }
+    }
+    const complete = (() => {
+      if (phase === 'after' || phase === 'closed') return true;
+      if (phase === 'pre') return false;
+      if (phase === 'lunch') return bM <= 11 * 60 + 30;
+      if (phase === 'am') return bM <= nowM && bM <= 11 * 60 + 30;
+      return bM <= nowM; // pm
+    })();
+    const ratio = expected > 0 ? actual / expected : null;
+    const triggered = complete && ratio != null && ratio >= WINDOW_RATIO_TRIGGER && actual >= WINDOW_MIN_AMOUNT_YI;
+    out.push({ startHHMM: a, endHHMM: b, label: `${a}–${b}`, actualYi: actual, expectedYi: expected, ratio, triggered, complete });
+  }
+  return out;
+}
 
 export function makeVerdict(args: {
   phase: 'pre' | 'am' | 'lunch' | 'pm' | 'after' | 'closed';
@@ -285,10 +373,13 @@ export function makeVerdict(args: {
   tailToday: number | null; // 当日尾盘占比（收盘后）
   tailBase: number | null; // 尾盘占比 20 日均值
   fullDay: boolean;
+  windows?: WindowStat[];
 }): Verdict {
-  const { phase, ratio, netBuy, progressPct, tailToday, tailBase, fullDay } = args;
-  // 二元判定：只有「汪汪队有上班 / 汪汪队没上班」两个答案
-  const working = ratio != null && ((ratio >= 1.5 && (netBuy ?? 0) > 0) || (netBuy ?? 0) >= 50);
+  const { phase, ratio, netBuy, progressPct, tailToday, tailBase, fullDay, windows } = args;
+  // 二元判定：全天口径或任一完整窗口放量，均算上班
+  const triggered = (windows ?? []).filter((w) => w.triggered);
+  const working =
+    (ratio != null && ((ratio >= 1.5 && (netBuy ?? 0) > 0) || (netBuy ?? 0) >= 50)) || triggered.length > 0;
   const headline = working ? '汪汪队有上班' : '汪汪队没上班';
   const tone: Verdict['tone'] = ratio == null ? 'na' : working ? 'hot' : 'calm';
 
@@ -311,6 +402,13 @@ export function makeVerdict(args: {
     );
   }
   if (netTxt) parts.push(netTxt);
+  if (triggered.length > 0) {
+    const list = triggered
+      .slice(-3)
+      .map((w) => `${w.label} 放量 ${w.ratio!.toFixed(1)}×（成交 ${w.actualYi.toFixed(1)} 亿）`)
+      .join('、');
+    parts.push(`10 分钟窗口出现集中放量：${list}${triggered.length > 3 ? ` 等 ${triggered.length} 个窗口` : ''}`);
+  }
   if (fullDay && tailToday != null && tailBase != null && tailBase > 0) {
     const r = tailToday / tailBase;
     parts.push(

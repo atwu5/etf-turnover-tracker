@@ -14,7 +14,8 @@ import {
 } from '../data/store';
 import {
   buildBaselineFrom5m, progressAt, spotRatio, dayRatio, netBuyYi, weightedPct, subscrNetYi,
-  detectStaleMarkets, buildShareSeries, makeVerdict, type Baseline, type ShareSeriesPoint, groupByDay,
+  detectStaleMarkets, buildShareSeries, makeVerdict, buildWindowStats, groupByDay,
+  type Baseline, type ShareSeriesPoint, type WindowStat,
 } from '../domain/metrics';
 import { isFullDayData, isLivePhase, nowHHMM, phaseOf, type SessionPhase } from '../domain/session';
 
@@ -90,8 +91,10 @@ export function useTracker() {
   const [auto, setAuto] = useState(true);
   const [sharesStore, setSharesStore] = useState<SharesStore>(() => loadShares());
   const [prevShareDateLabel, setPrevShareDateLabel] = useState<string | null>(null);
+  const [todayBars, setTodayBars] = useState<Record<string, Bar[]>>({});
   const quoteErrRef = useRef(0);
   const quoteSrcRef = useRef<'tencent' | 'eastmoney'>('tencent');
+  const todayBarsDateRef = useRef('');
 
   const phase: SessionPhase = useMemo(() => {
     const firstQuote = Object.values(quotes)[0];
@@ -165,6 +168,24 @@ export function useTracker() {
     setWarnings(warns);
   }, []);
 
+  // ---------- 当日 5 分钟 K（10 分钟窗口判定用） ----------
+  const fetchTodayBars = useCallback(async (td: string) => {
+    if (!td) return;
+    try {
+      const { results } = await poolAll(POOL, 6, async (def) => {
+        const bars = await fetchSinaKline(def.tcode, 5, 64);
+        return bars.filter((b) => b.date === td);
+      });
+      const map: Record<string, Bar[]> = {};
+      POOL.forEach((def, i) => {
+        const r = results[i];
+        if (r && r.length) map[def.code] = r;
+      });
+      todayBarsDateRef.current = td;
+      setTodayBars(map);
+    } catch { /* 保留旧数据，下次再拉 */ }
+  }, []);
+
   // ---------- 首次启动 ----------
   useEffect(() => {
     let alive = true;
@@ -205,6 +226,7 @@ export function useTracker() {
         if (needRebuild) {
           await rebuildBaselines(td);
         }
+        void fetchTodayBars(td);
         await recordSharesFor(q, td, seedStore, setSharesStore, setPrevShareDateLabel);
       } catch (e) {
         if (!alive) return;
@@ -243,6 +265,22 @@ export function useTracker() {
     return () => window.clearInterval(t);
   }, [auto, tradeDate]);
 
+  // ---------- 每 5 分钟：盘中刷新当日 5 分钟 K（供 10 分钟窗口判定） ----------
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const ph = phaseOf(new Date(), tradeDate);
+      if (isLivePhase(ph)) void fetchTodayBars(tradeDate);
+    }, 5 * 60_000);
+    return () => window.clearInterval(t);
+  }, [tradeDate, fetchTodayBars]);
+
+  // ---------- 交易日变更 / 收盘后补拉当日完整 K ----------
+  useEffect(() => {
+    if (tradeDate && todayBarsDateRef.current !== tradeDate && !isLivePhase(phase)) {
+      void fetchTodayBars(tradeDate);
+    }
+  }, [phase, tradeDate, fetchTodayBars]);
+
   // ---------- 手动刷新 ----------
   const hardRefresh = useCallback(async () => {
     try {
@@ -252,6 +290,7 @@ export function useTracker() {
       setLastUpdate(new Date());
       quoteSrcRef.current = source;
       const td = quoteDateOf(Object.values(q)[0]);
+      void fetchTodayBars(td);
       const cache = loadBaselines();
       if (!cache || cache.tradeDate !== td) await rebuildBaselines(td);
       await recordSharesFor(q, td, sharesStore, setSharesStore, setPrevShareDateLabel);
@@ -325,9 +364,18 @@ export function useTracker() {
   }, [rows]);
 
   const fullDay = isFullDayData(phase);
+
+  // ---------- 10 分钟窗口判定 ----------
+  const windowStats: WindowStat[] = useMemo(() => {
+    if (!tradeDate) return [];
+    const funds = CORE_POOL.map((def) => baselines[def.code]).filter((b): b is Baseline => !!b && b.shape.length > 0)
+      .map((b) => ({ avg20Yi: b.avg20Yi, shape: b.shape }));
+    return buildWindowStats(funds, todayBars, tradeDate, nowHHMM(now), phase);
+  }, [baselines, todayBars, tradeDate, now, phase]);
+
   const verdict = useMemo(
-    () => makeVerdict({ phase, ratio: pool.ratio, netBuy: pool.netBuy, progressPct: pool.progressPct, tailToday: pool.tailToday, tailBase: pool.tailBase, fullDay }),
-    [phase, pool],
+    () => makeVerdict({ phase, ratio: pool.ratio, netBuy: pool.netBuy, progressPct: pool.progressPct, tailToday: pool.tailToday, tailBase: pool.tailBase, fullDay, windows: windowStats }),
+    [phase, pool, windowStats],
   );
 
   // ---------- 份额序列（图表用，重点监测池） ----------
@@ -339,7 +387,7 @@ export function useTracker() {
     booting, ready: !booting, quotes, rows, pool, verdict, phase, tradeDate, fullDay,
     warnings, baselineDone, baselineTotal, dataMode, lastUpdate, now,
     auto, setAuto, hardRefresh, shareSeries, prevShareDateLabel,
-    sharesCount: sharesStore.dates.length, mergeShares, exportShares,
+    sharesCount: sharesStore.dates.length, mergeShares, exportShares, windowStats,
   };
 }
 

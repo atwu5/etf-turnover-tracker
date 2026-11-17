@@ -1,4 +1,4 @@
-import { fmtRatio, fmtSigned, VERDICT_RULE, type Verdict } from '../domain/metrics';
+import { fmtRatio, fmtSigned, VERDICT_RULE, type Verdict, type WindowStat, WINDOWS } from '../domain/metrics';
 import { Card } from './ui';
 
 const TONE_META: Record<Verdict['tone'], { chip: string; bar: string }> = {
@@ -18,8 +18,51 @@ const PHASE_TAG: Record<string, string> = {
   closed: '休市',
 };
 
+/** 10 分钟窗口上班标记：上排 09:30–11:30，下排 13:00–15:00，悬停看倍数 */
+function WindowTimeline({ windows }: { windows: WindowStat[] }) {
+  const map = new Map(windows.map((w) => [w.startHHMM, w]));
+  const [am, pm] = [WINDOWS.slice(0, 12), WINDOWS.slice(12)];
+  const block = ([a]: [string, string]) => {
+    const w = map.get(a);
+    if (!w) return null;
+    const title = `${w.label} · 实际 ${w.actualYi.toFixed(1)} 亿 / 期望 ${w.expectedYi.toFixed(1)} 亿${w.ratio != null ? ` · ${w.ratio.toFixed(2)}×` : ''}${w.triggered ? ' · 上班信号' : ''}`;
+    const cls = w.triggered
+      ? 'bg-up'
+      : w.complete
+        ? 'bg-stone-300/80'
+        : 'border border-dashed border-stone-300';
+    return (
+      <div key={a} title={title} className={`h-4 flex-1 rounded-[3px] ${cls} transition-colors hover:opacity-80`} />
+    );
+  };
+  const anyTriggered = windows.some((w) => w.triggered);
+  return (
+    <div className="border-t border-slate-100 bg-stone-50/50 px-5 py-3">
+      <div className="flex items-center justify-between text-[11px] font-medium tracking-wider text-stone-400">
+        10 分钟窗口上班标记
+        <span className="text-[10px] normal-case tracking-normal">
+          红块 = 放量≥2× 且成交≥10 亿 · 悬停看明细
+        </span>
+      </div>
+      <div className="mt-1.5 flex items-center gap-1">
+        <span className="w-6 shrink-0 text-[10px] text-stone-400">上午</span>
+        <div className="flex flex-1 gap-[3px]">{am.map(block)}</div>
+      </div>
+      <div className="mt-1.5 flex items-center gap-1">
+        <span className="w-6 shrink-0 text-[10px] text-stone-400">下午</span>
+        <div className="flex flex-1 gap-[3px]">{pm.map(block)}</div>
+      </div>
+      {anyTriggered && (
+        <div className="mt-1.5 text-[11px] text-up">
+          集中放量窗口：{windows.filter((w) => w.triggered).map((w) => w.label).join('、')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function VerdictCard({
-  verdict, phase, ratio, progressPct, avgSum, fullDay,
+  verdict, phase, ratio, progressPct, avgSum, fullDay, windows = [],
 }: {
   verdict: Verdict;
   phase: string;
@@ -27,6 +70,7 @@ export function VerdictCard({
   progressPct: number | null;
   avgSum: number; // Σ 20日均额（亿）
   fullDay: boolean;
+  windows?: WindowStat[];
 }) {
   const tone = TONE_META[verdict.tone];
   // 进度条：同时点进度（盘中）或 100%（收盘）
@@ -61,6 +105,7 @@ export function VerdictCard({
         </div>
       </div>
       <div className="hairline-gold" />
+      {windows.length > 0 && <WindowTimeline windows={windows} />}
     </Card>
   );
 }

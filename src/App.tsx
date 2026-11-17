@@ -112,6 +112,7 @@ export default function App() {
             progressPct={t.pool.progressPct}
             avgSum={coreAvgSum}
             fullDay={t.fullDay}
+            windows={t.windowStats}
           />
           <KpiGrid
             totalAmount={t.pool.totalAmount}

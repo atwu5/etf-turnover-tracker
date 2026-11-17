@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BAR_LABELS, averageShape, barAmountYi, buildBaselineFrom5m, buildShareSeries, dayRatio,
+  BAR_LABELS, averageShape, barAmountYi, buildBaselineFrom5m, buildShareSeries, buildWindowStats, dayRatio,
   detectStaleMarkets, fmtSigned, makeVerdict, netBuyYi, progressAt, spotRatio, subscrNetYi,
-  tailAmountYi, tailRatioOfDay, weightedPct, hhmm,
-  type Bar,
+  tailAmountYi, tailRatioOfDay, weightedPct, hhmm, WINDOWS, type Bar,
 } from '../src/domain/metrics';
 
 // ---------- 工具：构造合成 5 分钟 K ----------
@@ -201,6 +200,62 @@ describe('结论文案（二元判定）', () => {
     const v = makeVerdict({ phase: 'after', ratio: 1.2, netBuy: 8, progressPct: 100, tailToday: 0.3, tailBase: 0.15, fullDay: true });
     expect(v.detail).toContain('全天成交额为 20 日均额的 1.20 倍');
     expect(v.detail).toContain('尾盘');
+  });
+});
+
+describe('10 分钟窗口判定', () => {
+  // shape：上午占 50%（09:30-11:30），下午 50%；10 分钟窗口约 1/24 ≈ 4.17%
+  const shape: [string, number][] = [];
+  for (let i = 0; i < 48; i++) {
+    const cum = (i + 1) / 48;
+    shape.push([BAR_LABELS[i], cum]);
+  }
+  const funds = [{ avg20Yi: 240, shape }]; // 每窗口期望 ≈ 240/24 = 10 亿
+  const bar = (hm: string, yi: number): Bar => ({ date: '20261116', hm, close: 4, volume: 0, amount: yi * 1e8 });
+
+  it('WINDOWS 生成 24 个窗口（12 上午 + 12 下午，跨越午休）', () => {
+    expect(WINDOWS).toHaveLength(24);
+    expect(WINDOWS[0]).toEqual(['09:30', '09:40']);
+    expect(WINDOWS[11]).toEqual(['11:20', '11:30']);
+    expect(WINDOWS[12]).toEqual(['13:00', '13:10']);
+    expect(WINDOWS[23]).toEqual(['14:50', '15:00']);
+  });
+
+  it('正常窗口 → 不触发；尾盘放量 ≥2× 且 ≥10 亿 → 触发', () => {
+    const todayBars = { '510300': [bar('14:55', 35)] }; // 仅最后一根 K：14:50-15:00 窗口 35 亿
+    const stats = buildWindowStats(funds, todayBars, '20261116', '16:00', 'after');
+    expect(stats).toHaveLength(24);
+    const quiet = stats[5]; // 上午某窗口，无成交
+    expect(quiet.complete).toBe(true);
+    expect(quiet.ratio).toBeCloseTo(0);
+    expect(quiet.triggered).toBe(false);
+    const tail = stats[23]; // 14:50–15:00
+    expect(tail.actualYi).toBeCloseTo(35);
+    expect(tail.ratio).toBeCloseTo(35 / 10);
+    expect(tail.triggered).toBe(true);
+  });
+
+  it('未走完的窗口不触发', () => {
+    const todayBars = { '510300': [bar('09:40', 30)] };
+    const stats = buildWindowStats(funds, todayBars, '20261116', '09:36', 'am'); // 09:40 窗口未走完
+    expect(stats[1].complete).toBe(false);
+    expect(stats[1].triggered).toBe(false);
+  });
+
+  it('成交额低于 10 亿下限不触发（防小窗口噪声）', () => {
+    const todayBars = { '510300': [bar('14:55', 9)] };
+    const stats = buildWindowStats(funds, todayBars, '20261116', '16:00', 'after');
+    expect(stats[23].ratio).toBeCloseTo(0.9);
+    expect(stats[23].triggered).toBe(false);
+  });
+
+  it('昨日式场景：全天累计平淡但尾盘两窗口放量 → 判「有上班」', () => {
+    const todayBars = { '510300': [bar('14:45', 12), bar('14:50', 35), bar('14:55', 40)] };
+    const stats = buildWindowStats(funds, todayBars, '20261116', '16:00', 'after');
+    const v = makeVerdict({ phase: 'after', ratio: 0.91, netBuy: 40, progressPct: 100, tailToday: 0.2, tailBase: 0.073, fullDay: true, windows: stats });
+    expect(v.headline).toBe('汪汪队有上班');
+    expect(v.detail).toContain('10 分钟窗口出现集中放量');
+    expect(v.detail).toContain('14:50–15:00');
   });
 });
 
