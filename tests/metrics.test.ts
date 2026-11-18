@@ -265,7 +265,7 @@ describe('大盘成交额提示', () => {
     expect(marketTurnoverText(13800, 14500, true, '15:05')).toBe('大盘成交额 1.38万亿 · 较昨日 −700亿');
   });
   it('盘中：展示截至时间与昨日全天（不直接比部分量）；万亿以下用亿', () => {
-    expect(marketTurnoverText(6300, 14500, false, '10:40')).toBe('大盘成交额 6300亿（截至 10:40）· 昨日全天 1.45万亿');
+    expect(marketTurnoverText(6300, 14500, false, '10:40')).toBe('大盘成交额 6300亿（截至 10:40） · 昨日全天 1.45万亿');
   });
   it('万亿以下用亿；无昨日数据时省略对比；无数据返回 null', () => {
     expect(marketTurnoverText(9800, null, true, '15:00')).toBe('大盘成交额 9800亿');
