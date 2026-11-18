@@ -113,6 +113,7 @@ export default function App() {
             avgSum={coreAvgSum}
             fullDay={t.fullDay}
             windows={t.windowStats}
+            marketText={t.marketText}
           />
           <KpiGrid
             totalAmount={t.pool.totalAmount}

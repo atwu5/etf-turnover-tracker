@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CORE_POOL, POOL, type EtfDef } from '../config/pool';
-import { fetchQuotes, fetchTencentDaily, quoteDateOf, type Quote } from '../data/tencent';
+import { fetchQuotes, fetchTencentDaily, quoteDateOf, quoteHMOf, type Quote } from '../data/tencent';
 import { fetchQuotesEM } from '../data/eastmoney';
 import { fetchSinaDaily, fetchSinaKline, type Bar } from '../data/sina';
 import { poolAll } from '../data/jsonp';
@@ -14,7 +14,7 @@ import {
 } from '../data/store';
 import {
   buildBaselineFrom5m, progressAt, spotRatio, dayRatio, netBuyYi, weightedPct, subscrNetYi,
-  detectStaleMarkets, buildShareSeries, makeVerdict, buildWindowStats, groupByDay,
+  detectStaleMarkets, buildShareSeries, makeVerdict, buildWindowStats, groupByDay, marketTurnoverText,
   type Baseline, type ShareSeriesPoint, type WindowStat,
 } from '../domain/metrics';
 import { isFullDayData, isLivePhase, nowHHMM, phaseOf, type SessionPhase } from '../domain/session';
@@ -39,13 +39,17 @@ const K_DALEN_DAILY = 60;
 const POLL_MS = 20_000;
 const MARKET_OF = (code: string): 'sh' | 'sz' => (POOL.find((x) => x.code === code)?.tcode.startsWith('sh') ? 'sh' : 'sz');
 
+/** 大盘成交额用指数：上证指数（沪市全部）+ 深证综指（深市全部） */
+const INDEX_TC = ['sh000001', 'sz399106'];
+const ALL_TC = [...POOL.map((x) => x.tcode), ...INDEX_TC];
+
 /**
  * 行情快照：腾讯为主源，失败时自动切换东方财富备用源。
  * 东方财富无外盘/内盘 → 降级模式下主动净买入不展示（其余指标齐全）。
  */
 async function fetchQuotesWithFallback(): Promise<{ quotes: Record<string, Quote>; source: 'tencent' | 'eastmoney' }> {
   try {
-    return { quotes: await fetchQuotes(POOL.map((x) => x.tcode)), source: 'tencent' };
+    return { quotes: await fetchQuotes(ALL_TC), source: 'tencent' };
   } catch (tencentErr) {
     const em = await fetchQuotesEM(POOL.map((x) => x.tcode));
     const quotes: Record<string, Quote> = {};
@@ -92,6 +96,7 @@ export function useTracker() {
   const [sharesStore, setSharesStore] = useState<SharesStore>(() => loadShares());
   const [prevShareDateLabel, setPrevShareDateLabel] = useState<string | null>(null);
   const [todayBars, setTodayBars] = useState<Record<string, Bar[]>>({});
+  const [marketPrevYi, setMarketPrevYi] = useState<number | null>(null);
   const quoteErrRef = useRef(0);
   const quoteSrcRef = useRef<'tencent' | 'eastmoney'>('tencent');
   const todayBarsDateRef = useRef('');
@@ -186,6 +191,23 @@ export function useTracker() {
     } catch { /* 保留旧数据，下次再拉 */ }
   }, []);
 
+  // ---------- 大盘昨日成交额（新浪 5 分钟 K 逐日累加，每交易日一次） ----------
+  const marketPrevDateRef = useRef('');
+  const fetchMarketPrev = useCallback(async (td: string) => {
+    if (!td || marketPrevDateRef.current === td) return;
+    marketPrevDateRef.current = td;
+    try {
+      const totals = await Promise.all(INDEX_TC.map(async (tc) => {
+        const bars = await fetchSinaKline(tc, 5, 130);
+        const dates = [...new Set(bars.map((b) => b.date))].filter((d) => d < td).sort();
+        const prev = dates.at(-1);
+        return prev ? bars.filter((b) => b.date === prev).reduce((s, b) => s + (b.amount ?? b.volume * b.close), 0) / 1e8 : null;
+      }));
+      const sum = totals.reduce<number>((s, x) => s + (x ?? 0), 0);
+      if (sum > 0) setMarketPrevYi(sum);
+    } catch { /* 保留空值，页面不显示昨日对比 */ }
+  }, []);
+
   // ---------- 首次启动 ----------
   useEffect(() => {
     let alive = true;
@@ -227,6 +249,7 @@ export function useTracker() {
           await rebuildBaselines(td);
         }
         void fetchTodayBars(td);
+        void fetchMarketPrev(td);
         await recordSharesFor(q, td, seedStore, setSharesStore, setPrevShareDateLabel);
       } catch (e) {
         if (!alive) return;
@@ -291,6 +314,7 @@ export function useTracker() {
       quoteSrcRef.current = source;
       const td = quoteDateOf(Object.values(q)[0]);
       void fetchTodayBars(td);
+      void fetchMarketPrev(td);
       const cache = loadBaselines();
       if (!cache || cache.tradeDate !== td) await rebuildBaselines(td);
       await recordSharesFor(q, td, sharesStore, setSharesStore, setPrevShareDateLabel);
@@ -378,6 +402,16 @@ export function useTracker() {
     [phase, pool, windowStats],
   );
 
+  // ---------- 大盘成交额提示 ----------
+  const marketText = useMemo(() => {
+    const sh = quotes['sh000001'];
+    const sz = quotes['sz399106'];
+    const todayYi = sh && sz && sh.amountWan > 0 && sz.amountWan > 0 ? (sh.amountWan + sz.amountWan) / 1e4 : null;
+    const anyQuote = Object.values(quotes)[0];
+    const asOf = anyQuote ? quoteHMOf(anyQuote) : '';
+    return marketTurnoverText(todayYi, marketPrevYi, fullDay, asOf);
+  }, [quotes, marketPrevYi, fullDay]);
+
   // ---------- 份额序列（图表用，重点监测池） ----------
   const shareSeries: ShareSeriesPoint[] = useMemo(() => {
     return buildShareSeries(sharesStore.dates, sharesStore.byDate, sharesStore.stale, CORE_POOL.map((x) => x.code), MARKET_OF);
@@ -387,7 +421,7 @@ export function useTracker() {
     booting, ready: !booting, quotes, rows, pool, verdict, phase, tradeDate, fullDay,
     warnings, baselineDone, baselineTotal, dataMode, lastUpdate, now,
     auto, setAuto, hardRefresh, shareSeries, prevShareDateLabel,
-    sharesCount: sharesStore.dates.length, mergeShares, exportShares, windowStats,
+    sharesCount: sharesStore.dates.length, mergeShares, exportShares, windowStats, marketText,
   };
 }
 

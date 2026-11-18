@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BAR_LABELS, averageShape, barAmountYi, buildBaselineFrom5m, buildShareSeries, buildWindowStats, dayRatio,
   detectStaleMarkets, fmtSigned, makeVerdict, netBuyYi, progressAt, spotRatio, subscrNetYi,
-  tailAmountYi, tailRatioOfDay, weightedPct, hhmm, WINDOWS, type Bar,
+  tailAmountYi, tailRatioOfDay, weightedPct, hhmm, marketTurnoverText, WINDOWS, type Bar,
 } from '../src/domain/metrics';
 
 // ---------- 工具：构造合成 5 分钟 K ----------
@@ -256,6 +256,20 @@ describe('10 分钟窗口判定', () => {
     expect(v.headline).toBe('汪汪队有上班');
     expect(v.detail).toContain('10 分钟窗口出现集中放量');
     expect(v.detail).toContain('14:50–15:00');
+  });
+});
+
+describe('大盘成交额提示', () => {
+  it('收盘后：今日 vs 较昨日增减', () => {
+    expect(marketTurnoverText(15200, 14500, true, '15:05')).toBe('大盘成交额 1.52万亿 · 较昨日 +700亿');
+    expect(marketTurnoverText(13800, 14500, true, '15:05')).toBe('大盘成交额 1.38万亿 · 较昨日 −700亿');
+  });
+  it('盘中：展示截至时间与昨日全天（不直接比部分量）；万亿以下用亿', () => {
+    expect(marketTurnoverText(6300, 14500, false, '10:40')).toBe('大盘成交额 6300亿（截至 10:40）· 昨日全天 1.45万亿');
+  });
+  it('万亿以下用亿；无昨日数据时省略对比；无数据返回 null', () => {
+    expect(marketTurnoverText(9800, null, true, '15:00')).toBe('大盘成交额 9800亿');
+    expect(marketTurnoverText(null, 14500, true, '15:00')).toBeNull();
   });
 });
 

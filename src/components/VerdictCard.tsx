@@ -62,7 +62,7 @@ function WindowTimeline({ windows }: { windows: WindowStat[] }) {
 }
 
 export function VerdictCard({
-  verdict, phase, ratio, progressPct, avgSum, fullDay, windows = [],
+  verdict, phase, ratio, progressPct, avgSum, fullDay, windows = [], marketText = null,
 }: {
   verdict: Verdict;
   phase: string;
@@ -71,6 +71,8 @@ export function VerdictCard({
   avgSum: number; // Σ 20日均额（亿）
   fullDay: boolean;
   windows?: WindowStat[];
+  /** 大盘成交额提示（如「大盘成交额 1.52万亿 · 较昨日 +700亿」） */
+  marketText?: string | null;
 }) {
   const tone = TONE_META[verdict.tone];
   // 进度条：同时点进度（盘中）或 100%（收盘）
@@ -82,6 +84,9 @@ export function VerdictCard({
           <div className="flex items-center gap-2 text-xs font-medium tracking-widest text-ink-muted">
             今日结论
             <span className={`rounded px-1.5 py-0.5 text-[11px] tracking-normal ${tone.chip}`}>{PHASE_TAG[phase] ?? ''}</span>
+            {marketText && (
+              <span className="tracking-normal text-[11px] font-medium text-gold-ink">· {marketText}</span>
+            )}
           </div>
           <h2 className={`font-serif mt-2 text-[26px] font-bold tracking-tight ${verdict.tone === 'hot' ? 'text-up' : verdict.tone === 'quiet' ? 'text-down' : 'text-ink'}`}>
             {verdict.headline}
