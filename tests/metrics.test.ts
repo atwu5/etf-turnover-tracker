@@ -259,16 +259,16 @@ describe('10 分钟窗口判定', () => {
   });
 });
 
-describe('大盘成交额提示', () => {
-  it('收盘后：今日 vs 较昨日增减', () => {
-    expect(marketTurnoverText(15200, 14500, true, '15:05')).toBe('大盘成交额 1.52万亿 · 较昨日 +700亿');
-    expect(marketTurnoverText(13800, 14500, true, '15:05')).toBe('大盘成交额 1.38万亿 · 较昨日 −700亿');
+describe('大盘成交额提示（较同期放量/缩量）', () => {
+  it('盘中：较同期放量', () => {
+    expect(marketTurnoverText(7600, 6800, false, '10:55')).toBe('大盘成交额 7600亿 · 较同期放量 +12%（截至 10:55）');
   });
-  it('盘中：展示截至时间与昨日全天（不直接比部分量）；万亿以下用亿', () => {
-    expect(marketTurnoverText(6300, 14500, false, '10:40')).toBe('大盘成交额 6300亿（截至 10:40） · 昨日全天 1.45万亿');
+  it('收盘后：较同期缩量（与 20 日全天均值比）', () => {
+    expect(marketTurnoverText(15200, 15900, true, '15:05')).toBe('大盘成交额 1.52万亿 · 较同期缩量 −4%');
   });
-  it('万亿以下用亿；无昨日数据时省略对比；无数据返回 null', () => {
+  it('无期望值（基线未就绪）：收盘后只报数值，盘中不显示', () => {
     expect(marketTurnoverText(9800, null, true, '15:00')).toBe('大盘成交额 9800亿');
+    expect(marketTurnoverText(9800, null, false, '10:40')).toBeNull();
     expect(marketTurnoverText(null, 14500, true, '15:00')).toBeNull();
   });
 });

@@ -274,18 +274,15 @@ export interface Verdict {
   tone: 'calm' | 'warm' | 'hot' | 'quiet' | 'na';
 }
 
-/** 大盘成交额提示文本：收盘后给「较昨日 ±x」，盘中展示「昨日全天 x」（盘中当日值是部分量，直接比会误导） */
-export function marketTurnoverText(todayYi: number | null, prevYi: number | null, fullDay: boolean, asOf: string): string | null {
+/** 大盘成交额提示：较历史同期（近 20 日同时点累计）放量/缩量；收盘后=与全天均值比 */
+export function marketTurnoverText(todayYi: number | null, expectedYi: number | null, fullDay: boolean, asOf: string): string | null {
   if (todayYi == null || todayYi <= 0) return null;
   const fmtY = (yi: number) => (yi >= 10000 ? `${(yi / 10000).toFixed(2)}万亿` : `${yi.toFixed(0)}亿`);
-  if (fullDay) {
-    if (prevYi == null || prevYi <= 0) return `大盘成交额 ${fmtY(todayYi)}`;
-    const delta = todayYi - prevYi;
-    const sign = delta >= 0 ? '+' : '−';
-    return `大盘成交额 ${fmtY(todayYi)} · 较昨日 ${sign}${Math.abs(delta).toFixed(0)}亿`;
-  }
-  const prevTxt = prevYi != null && prevYi > 0 ? ` · 昨日全天 ${fmtY(prevYi)}` : '';
-  return `大盘成交额 ${fmtY(todayYi)}（截至 ${asOf}）${prevTxt}`;
+  if (expectedYi == null || expectedYi <= 0) return fullDay ? `大盘成交额 ${fmtY(todayYi)}` : null;
+  const pct = (todayYi / expectedYi - 1) * 100;
+  const word = pct >= 0 ? `放量 +${pct.toFixed(0)}%` : `缩量 −${Math.abs(pct).toFixed(0)}%`;
+  const asOfTxt = fullDay ? '' : `（截至 ${asOf}）`;
+  return `大盘成交额 ${fmtY(todayYi)} · 较同期${word}${asOfTxt}`;
 }
 
 /** 判定阈值：全天口径（同时点倍数≥1.5且净买入>0，或净买入≥50亿），或任一完整 10 分钟窗口放量≥2×且成交≥10亿 → 有上班 */
