@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CORE_POOL, POOL, type EtfDef } from '../config/pool';
-import { fetchQuotes, fetchTencentDaily, quoteDateOf, quoteHMOf, type Quote } from '../data/tencent';
+import { fetchQuotes, fetchTencentDaily, quoteDateOf, type Quote } from '../data/tencent';
 import { fetchQuotesEM } from '../data/eastmoney';
 import { fetchSinaDaily, fetchSinaKline, type Bar } from '../data/sina';
 import { poolAll } from '../data/jsonp';
@@ -17,7 +17,7 @@ import {
   detectStaleMarkets, buildShareSeries, makeVerdict, buildWindowStats, groupByDay, marketTurnoverText,
   type Baseline, type ShareSeriesPoint, type WindowStat,
 } from '../domain/metrics';
-import { isFullDayData, isLivePhase, nowHHMM, phaseOf, type SessionPhase } from '../domain/session';
+import { isFullDayData, isLivePhase, minutesOf, nowHHMM, phaseOf, type SessionPhase } from '../domain/session';
 
 export interface RowState {
   def: EtfDef;
@@ -96,7 +96,7 @@ export function useTracker() {
   const [sharesStore, setSharesStore] = useState<SharesStore>(() => loadShares());
   const [prevShareDateLabel, setPrevShareDateLabel] = useState<string | null>(null);
   const [todayBars, setTodayBars] = useState<Record<string, Bar[]>>({});
-  const [marketBase, setMarketBase] = useState<{ sh: Baseline; sz: Baseline } | null>(null);
+  const [marketPrev, setMarketPrev] = useState<{ sh: Bar[]; sz: Bar[] } | null>(null);
   const quoteErrRef = useRef(0);
   const quoteSrcRef = useRef<'tencent' | 'eastmoney'>('tencent');
   const todayBarsDateRef = useRef('');
@@ -191,14 +191,19 @@ export function useTracker() {
     } catch { /* 保留旧数据，下次再拉 */ }
   }, []);
 
-  // ---------- 大盘基线（两指数近 20 日 5 分钟 K → 同时点期望成交，每交易日一次） ----------
-  const marketBaseDateRef = useRef('');
-  const fetchMarketBase = useCallback(async (td: string) => {
-    if (!td || marketBaseDateRef.current === td) return;
-    marketBaseDateRef.current = td;
+  // ---------- 大盘昨日 5 分钟 K（较昨日同期对比，每交易日一次） ----------
+  const marketPrevDateRef = useRef('');
+  const fetchMarketPrev = useCallback(async (td: string) => {
+    if (!td || marketPrevDateRef.current === td) return;
+    marketPrevDateRef.current = td;
     try {
-      const [sh, sz] = await Promise.all(INDEX_TC.map(async (tc) => buildBaselineFrom5m(await fetchSinaKline(tc, 5, 1030), td)));
-      if (sh && sz) setMarketBase({ sh, sz });
+      const [sh, sz] = await Promise.all(INDEX_TC.map(async (tc) => fetchSinaKline(tc, 5, 130)));
+      const prevDate = [...new Set(sh.map((b) => b.date))].filter((d) => d < td).sort().at(-1);
+      if (!prevDate) return;
+      setMarketPrev({
+        sh: sh.filter((b) => b.date === prevDate),
+        sz: sz.filter((b) => b.date === prevDate),
+      });
     } catch { /* 保留旧值 */ }
   }, []);
 
@@ -243,7 +248,7 @@ export function useTracker() {
           await rebuildBaselines(td);
         }
         void fetchTodayBars(td);
-        void fetchMarketBase(td);
+        void fetchMarketPrev(td);
         await recordSharesFor(q, td, seedStore, setSharesStore, setPrevShareDateLabel);
       } catch (e) {
         if (!alive) return;
@@ -308,7 +313,7 @@ export function useTracker() {
       quoteSrcRef.current = source;
       const td = quoteDateOf(Object.values(q)[0]);
       void fetchTodayBars(td);
-      void fetchMarketBase(td);
+      void fetchMarketPrev(td);
       const cache = loadBaselines();
       if (!cache || cache.tradeDate !== td) await rebuildBaselines(td);
       await recordSharesFor(q, td, sharesStore, setSharesStore, setPrevShareDateLabel);
@@ -396,25 +401,22 @@ export function useTracker() {
     [phase, pool, windowStats],
   );
 
-  // ---------- 大盘成交额提示（较同期放量/缩量） ----------
+  // ---------- 大盘成交额提示（较昨日同期放量/缩量） ----------
   useEffect(() => {
-    if (tradeDate && marketBaseDateRef.current !== tradeDate) void fetchMarketBase(tradeDate);
-  }, [tradeDate, fetchMarketBase]);
+    if (tradeDate && marketPrevDateRef.current !== tradeDate) void fetchMarketPrev(tradeDate);
+  }, [tradeDate, fetchMarketPrev]);
 
   const marketText = useMemo(() => {
     const sh = quotes['sh000001'];
     const sz = quotes['sz399106'];
     const todayYi = sh && sz && sh.amountWan > 0 && sz.amountWan > 0 ? (sh.amountWan + sz.amountWan) / 1e4 : null;
-    let expectedYi: number | null = null;
-    if (marketBase) {
-      expectedYi =
-        marketBase.sh.avg20Yi * progressAt(marketBase.sh.shape, nowHHMM(now), phase) +
-        marketBase.sz.avg20Yi * progressAt(marketBase.sz.shape, nowHHMM(now), phase);
-    }
-    const anyQuote = Object.values(quotes)[0];
-    const asOf = anyQuote ? quoteHMOf(anyQuote) : '';
-    return marketTurnoverText(todayYi, expectedYi, fullDay, asOf);
-  }, [quotes, marketBase, fullDay, now, phase]);
+    if (todayYi == null || !marketPrev) return null;
+    const nowM = minutesOf(nowHHMM(now));
+    const cum = (bars: Bar[]) =>
+      bars.filter((b) => minutesOf(b.hm) <= nowM).reduce((s, b) => s + (b.amount ?? b.volume * b.close), 0) / 1e8;
+    const prevYi = cum(marketPrev.sh) + cum(marketPrev.sz);
+    return marketTurnoverText(todayYi, prevYi);
+  }, [quotes, marketPrev, now]);
 
   // ---------- 份额序列（图表用，重点监测池） ----------
   const shareSeries: ShareSeriesPoint[] = useMemo(() => {
